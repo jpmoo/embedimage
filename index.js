@@ -12,7 +12,7 @@ const BUTTON_ID = 1;
 // type=1: sidebar button (plugins area). showType=1: tap opens the plugin view (App.tsx).
 PluginManager.registerButton(1, ['NOTE'], {
   id: BUTTON_ID,
-  name: 'Embed Image',
+  name: 'Embed PNG',
   icon: Image.resolveAssetSource(require('./assets/icon.png')).uri,
   showType: 1,
 });

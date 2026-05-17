@@ -15,7 +15,7 @@ import { FileUtils, PluginManager, PluginNoteAPI } from 'sn-plugin-lib';
 type SortKey = 'date_desc' | 'date_asc' | 'name';
 type ImageItem = { name: string; path: string };
 
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'];
+const IMAGE_EXTS = ['.png'];
 const IMAGES_DIR = '/storage/emulated/0/Document/Images';
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
@@ -128,7 +128,7 @@ export default function App(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.title}>Embed Image</Text>
+        <Text style={styles.title}>Embed PNG</Text>
         <Pressable style={styles.btn} onPress={() => PluginManager.closePluginView().catch(() => {})}>
           <Text style={styles.btnTxt}>Close</Text>
         </Pressable>
@@ -158,7 +158,7 @@ export default function App(): React.JSX.Element {
 
       {sorted.length === 0 ? (
         <View style={styles.center}>
-          <Text style={styles.empty}>No images yet.</Text>
+          <Text style={styles.empty}>No PNG files yet.</Text>
           <Text style={styles.emptySub}>{IMAGES_DIR}</Text>
         </View>
       ) : (
