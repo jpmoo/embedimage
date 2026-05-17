@@ -4,3 +4,13 @@ dist/
 .DS_Store
 *.log
 .metro-health-check*
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+*.iml
+.idea/
+
