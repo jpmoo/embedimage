@@ -2,8 +2,8 @@
   "name": "Embed Image",
   "desc": "Browse images in Documents/Images and embed them into the current note.",
   "iconPath": "./assets/icon.png",
-  "versionName": "0.1.3-probe",
-  "versionCode": "4",
+  "versionName": "0.1.4",
+  "versionCode": "5",
   "pluginID": "embedimagev0001a",
   "pluginKey": "embedimage",
   "jsMainPath": "index"
