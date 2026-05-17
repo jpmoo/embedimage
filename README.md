@@ -17,7 +17,7 @@ npm install
 ./buildPlugin.sh
 ```
 
-Copy `dist/embedimage.zip` to the device and install via **Settings → Apps → Plugins → Install**.
+Copy `build/outputs/embedimage.snplg` to the device and install via **Settings → Apps → Plugins → Install**.
 
 ## Notes
 
