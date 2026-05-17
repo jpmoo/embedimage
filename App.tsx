@@ -16,7 +16,7 @@ type SortKey = 'date_desc' | 'date_asc' | 'name';
 type ImageItem = { name: string; path: string };
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'];
-const IMAGES_DIR = '/storage/emulated/0/Documents/Images';
+const IMAGES_DIR = '/storage/emulated/0/Document/Images';
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'date_desc', label: 'Newest' },

@@ -1,6 +1,6 @@
 # Embed Image — Supernote Plugin
 
-Adds an **Embed Image** button to the plugins area of the sidebar in the NOTE editor. Tapping it opens a browser of images from `Documents/Images` (auto-created if absent) with thumbnails, filenames, and a sort selector (Newest — default, Oldest, Name). Selecting an image inserts it into the current note.
+Adds an **Embed Image** button to the plugins area of the sidebar in the NOTE editor. Tapping it opens a browser of images from `Document/Images` (auto-created if absent) with thumbnails, filenames, and a sort selector (Newest — default, Oldest, Name). Selecting an image inserts it into the current note.
 
 ## Layout
 
