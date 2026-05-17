@@ -7,23 +7,19 @@ AppRegistry.registerComponent(appName, () => App);
 
 PluginManager.init();
 
-const BUTTON_ID = 1001;
+const BUTTON_ID = 1;
 
-// type=1: sidebar/toolbar button in the NOTE editor's plugins area.
-// showType=1: tapping the button opens the full-screen plugin UI (App.tsx).
-// type=1 → sidebar button. expandButton=0 → no extension, just an entry in the sidebar plugins area.
+// type=1: sidebar button (plugins area). showType=1: tap opens the plugin view (App.tsx).
 PluginManager.registerButton(1, ['NOTE'], {
   id: BUTTON_ID,
   name: 'Embed Image',
   icon: Image.resolveAssetSource(require('./assets/icon.png')).uri,
-  enable: true,
-  expandButton: 0,
+  showType: 1,
 });
 
 PluginManager.registerButtonListener({
-  onButtonPress(event) {
-    if (event?.id === BUTTON_ID) {
-      PluginManager.showPluginView();
-    }
+  onButtonPress: (msg) => {
+    if (!msg || msg.id !== BUTTON_ID) return;
+    // showType=1 opens the view automatically; nothing else to do here.
   },
 });

@@ -1,16 +1,10 @@
 {
-  "pluginID": "com.jpmoore.embedimage",
-  "pluginKey": "plugin_embed_image",
+  "name": "Embed Image",
+  "desc": "Browse images in Documents/Images and embed them into the current note.",
   "iconPath": "./assets/icon.png",
-  "name": {
-    "en": "Embed Image",
-    "zh": "嵌入图片"
-  },
-  "desc": {
-    "en": "Browse images in Documents/Images and embed them into the current note.",
-    "zh": "浏览 Documents/Images 中的图片并将其嵌入当前笔记。"
-  },
   "versionName": "0.1.0",
   "versionCode": "1",
+  "pluginID": "embedimagev0001a",
+  "pluginKey": "embedimage",
   "jsMainPath": "index"
 }

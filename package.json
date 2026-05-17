@@ -1,6 +1,7 @@
 {
   "name": "embedimage",
   "version": "0.1.0",
+  "description": "Browse images in Documents/Images and embed them into the current note.",
   "private": true,
   "scripts": {
     "start": "react-native start",
@@ -11,8 +12,7 @@
   "dependencies": {
     "react": "19.0.0",
     "react-native": "0.79.2",
-    "react-native-fs": "^2.20.0",
-    "sn-plugin-lib": "*"
+    "sn-plugin-lib": "0.1.43"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

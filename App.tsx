@@ -8,29 +8,35 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
+  ToastAndroid,
   View,
 } from 'react-native';
-import RNFS from 'react-native-fs';
-import { PluginManager, PluginNoteAPI } from 'sn-plugin-lib';
+import { FileUtils, PluginManager, PluginNoteAPI } from 'sn-plugin-lib';
 
 type SortKey = 'date_desc' | 'date_asc' | 'name';
 
 type ImageItem = {
   name: string;
   path: string;
-  mtime: number;
 };
 
-const IMAGES_DIR = `${RNFS.ExternalStorageDirectoryPath}/Documents/Images`;
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'];
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  // True file-mtime sort is not available through the plugin SDK, so date sorts
+  // fall back to filename order. Camera/scanner output is usually timestamped,
+  // so this gives the expected ordering in practice.
   { key: 'date_desc', label: 'Newest' },
   { key: 'date_asc', label: 'Oldest' },
   { key: 'name', label: 'Name' },
 ];
 
-function isImage(name: string) {
+function basename(path: string): string {
+  const idx = path.lastIndexOf('/');
+  return idx >= 0 ? path.slice(idx + 1) : path;
+}
+
+function isImage(name: string): boolean {
   const lower = name.toLowerCase();
   return IMAGE_EXTS.some((ext) => lower.endsWith(ext));
 }
@@ -40,11 +46,19 @@ function sortItems(items: ImageItem[], sort: SortKey): ImageItem[] {
   if (sort === 'name') {
     copy.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   } else if (sort === 'date_asc') {
-    copy.sort((a, b) => a.mtime - b.mtime);
+    copy.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   } else {
-    copy.sort((a, b) => b.mtime - a.mtime);
+    copy.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true }));
   }
   return copy;
+}
+
+async function resolveImagesDir(): Promise<string> {
+  const volumes = await FileUtils.getExternalDirPath();
+  const root = Array.isArray(volumes) && volumes.length > 0
+    ? volumes[0]
+    : '/storage/emulated/0';
+  return `${root.replace(/\/+$/, '')}/Documents/Images`;
 }
 
 export default function App() {
@@ -52,24 +66,32 @@ export default function App() {
   const [sort, setSort] = useState<SortKey>('date_desc');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [dirPath, setDirPath] = useState<string>('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (!(await RNFS.exists(IMAGES_DIR))) {
-        await RNFS.mkdir(IMAGES_DIR);
+      const dir = await resolveImagesDir();
+      setDirPath(dir);
+      const exists = await FileUtils.exists(dir);
+      if (!exists) {
+        await FileUtils.makeDir(dir);
       }
-      const entries = await RNFS.readDir(IMAGES_DIR);
-      const imgs: ImageItem[] = entries
-        .filter((e) => e.isFile() && isImage(e.name))
-        .map((e) => ({
-          name: e.name,
-          path: e.path,
-          mtime: e.mtime ? e.mtime.getTime() : 0,
-        }));
+      const entries = (await FileUtils.listFiles(dir)) || [];
+      const imgs: ImageItem[] = [];
+      for (const entry of entries) {
+        // listFiles returns either string paths or { path, type } objects depending on SDK version.
+        const path = typeof entry === 'string' ? entry : (entry as any).path;
+        const type = typeof entry === 'string' ? 1 : (entry as any).type;
+        if (!path) continue;
+        if (type === 0) continue; // directory
+        const name = basename(path);
+        if (!isImage(name)) continue;
+        imgs.push({ name, path });
+      }
       setItems(imgs);
     } catch (err: any) {
-      Alert.alert('Embed Image', `Could not read ${IMAGES_DIR}\n${err?.message ?? err}`);
+      Alert.alert('Embed Image', `Could not read images directory.\n${err?.message ?? err}`);
     } finally {
       setLoading(false);
     }
@@ -85,14 +107,13 @@ export default function App() {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await PluginNoteAPI.insertImage(item.path);
-      if (!res?.success) {
+      const res: any = await PluginNoteAPI.insertImage(item.path);
+      if (!res || res.success === false) {
         throw new Error(res?.error?.message ?? 'insertImage failed');
       }
-      try {
-        await PluginNoteAPI.saveCurrentNote?.();
-      } catch {}
-      PluginManager.closePluginView?.();
+      try { await PluginNoteAPI.saveCurrentNote(); } catch {}
+      ToastAndroid.showWithGravity(`Embedded ${item.name}`, ToastAndroid.SHORT, ToastAndroid.BOTTOM);
+      PluginManager.closePluginView().catch(() => {});
     } catch (err: any) {
       Alert.alert('Embed Image', `Failed to embed: ${err?.message ?? err}`);
     } finally {
@@ -104,7 +125,10 @@ export default function App() {
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>Embed Image</Text>
-        <Pressable style={styles.closeBtn} onPress={() => PluginManager.closePluginView?.()}>
+        <Pressable
+          style={styles.closeBtn}
+          onPress={() => PluginManager.closePluginView().catch(() => {})}
+        >
           <Text style={styles.closeTxt}>Close</Text>
         </Pressable>
       </View>
@@ -137,8 +161,9 @@ export default function App() {
         </View>
       ) : sorted.length === 0 ? (
         <View style={styles.center}>
-          <Text style={styles.empty}>No images found in Documents/Images.</Text>
-          <Text style={styles.emptySub}>Drop image files into that folder and tap Refresh.</Text>
+          <Text style={styles.empty}>No images found.</Text>
+          <Text style={styles.emptySub}>{dirPath}</Text>
+          <Text style={styles.emptySub}>Drop image files here and tap Refresh.</Text>
         </View>
       ) : (
         <FlatList
