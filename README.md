@@ -1,5 +1,7 @@
 # Embed PNG — Supernote Plugin
 
+> Vibe-coded with Claude Code. Read the diffs before trusting it on a device you care about.
+
 Adds an **Embed PNG** button to the plugins area of the sidebar in the NOTE editor. Tapping it opens a browser of PNG files in `Document/Images` (auto-created if absent) with thumbnails, filenames, and a sort selector (Newest — default, Oldest, Name). Selecting a PNG inserts it into the current note on the current layer; reposition or resize it afterward with the lasso tool.
 
 **PNG only.** The Supernote host's image-insert API is built around PNG (the SDK parameter is named `pngPath`). JPEG/WebP files in the directory are ignored. Convert other formats to PNG before dropping them in.
