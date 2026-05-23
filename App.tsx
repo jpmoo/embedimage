@@ -23,6 +23,9 @@ const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 const ROOT = '/storage/emulated/0';
 const DEFAULT_DIR = ROOT + '/Document/Images';
 const PREVIEW_MAX_DIM = 800;
+const MIN_COLUMNS = 2;
+const MAX_COLUMNS = 6;
+const DEFAULT_COLUMNS = 3;
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'date_desc', label: 'Newest' },
@@ -214,6 +217,7 @@ export default function App(): React.JSX.Element {
   const [currentDir, setCurrentDir] = useState<string>(DEFAULT_DIR);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [sort, setSort] = useState<SortKey>('date_desc');
+  const [columns, setColumns] = useState<number>(DEFAULT_COLUMNS);
   const [status, setStatus] = useState<string>('starting…');
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Entry | null>(null);
@@ -575,6 +579,21 @@ export default function App(): React.JSX.Element {
           );
         })}
         <View style={{ flex: 1 }} />
+        <Text style={styles.sortLabel}>Size:</Text>
+        <Pressable
+          onPress={() => setColumns((c) => clamp(c + 1, MIN_COLUMNS, MAX_COLUMNS))}
+          style={styles.btn}
+          disabled={columns >= MAX_COLUMNS}
+        >
+          <Text style={[styles.btnTxt, columns >= MAX_COLUMNS && styles.btnTxtMuted]}>−</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setColumns((c) => clamp(c - 1, MIN_COLUMNS, MAX_COLUMNS))}
+          style={styles.btn}
+          disabled={columns <= MIN_COLUMNS}
+        >
+          <Text style={[styles.btnTxt, columns <= MIN_COLUMNS && styles.btnTxtMuted]}>+</Text>
+        </Pressable>
         <Pressable onPress={onSystemPicker} style={styles.btn}>
           <Text style={styles.btnTxt}>Browse…</Text>
         </Pressable>
@@ -588,17 +607,24 @@ export default function App(): React.JSX.Element {
           <Text style={styles.empty}>Nothing here.</Text>
           <Text style={styles.emptySub}>{currentDir}</Text>
           <Text style={styles.emptyHint}>
-            Tap “Browse…” to open the system picker — includes WebDAV mounts and SD card.
+            Tap “Browse…” to open the system picker — includes WebDAV mounts and SD card. If the
+            WebDAV listing looks stale, cancel and tap Browse again; each tap re-launches the
+            picker activity and re-fetches the remote listing.
           </Text>
         </View>
       ) : (
         <FlatList
+          key={`grid-${columns}`}
           data={sorted}
           keyExtractor={(it) => it.path}
-          numColumns={3}
+          numColumns={columns}
           contentContainerStyle={styles.grid}
           renderItem={({ item }) => (
-            <Pressable style={styles.tile} onPress={() => onPickEntry(item)} disabled={busy}>
+            <Pressable
+              style={[styles.tile, { flexBasis: `${100 / columns}%`, maxWidth: `${100 / columns}%` }]}
+              onPress={() => onPickEntry(item)}
+              disabled={busy}
+            >
               {item.kind === 'folder' ? (
                 <View style={styles.folderThumb}>
                   <Text style={styles.folderIcon}>📁</Text>
@@ -657,7 +683,7 @@ const styles = StyleSheet.create({
   btnTxtMuted: { color: '#999' },
   btnTxtPrimary: { color: '#fff' },
   grid: { padding: 8 },
-  tile: { flex: 1 / 3, padding: 6, alignItems: 'center' },
+  tile: { padding: 6, alignItems: 'center' },
   thumb: { width: '100%', aspectRatio: 1, backgroundColor: '#eee' },
   folderThumb: {
     width: '100%', aspectRatio: 1, backgroundColor: '#f4f4f4',
