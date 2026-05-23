@@ -87,8 +87,13 @@ async function refreshTrackRect(track: EmbedTrack): Promise<EmbedTrack> {
 
 export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Promise<EmbedTrack | null> {
   const fresh = await refreshTrackRect(track);
+  console.log('[embedimage] replaceInPlace start', {
+    notePath: fresh.notePath, page: fresh.page,
+    numInPage: fresh.numInPage, layerNum: fresh.layerNum,
+    uuid: fresh.uuid, rect: fresh.rect, newPngPath,
+  });
 
-  const elementBase = {
+  const newElement: any = {
     type: 200, // Element.TYPE_PICTURE
     pageNum: fresh.page,
     layerNum: fresh.layerNum,
@@ -98,65 +103,69 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     },
   };
 
-  // Preferred path: ask the SDK to modify the existing element in place.
-  // This is atomic from the user's POV so a failure can never leave the
-  // page with no embed (the previous bug was delete-then-insert: when
-  // insert failed the user lost their image with nothing to show).
-  let modifiedOk = false;
+  // Insert the new picture FIRST. We learned the hard way that the
+  // opposite order (delete then insert) can leave the user with no
+  // embed at all if the insert step silently fails. We also avoid the
+  // modifyElements path entirely — the SDK accepted it on 0.7.4 logs
+  // but the displayed picture never repainted (the renderer caches the
+  // bitmap by element identity and a path-only change doesn't
+  // invalidate that cache).
+  let insertOk = false;
+  let insertErr: any = null;
   try {
-    const modElement = {
-      ...elementBase,
-      uuid: fresh.uuid,
-      numInPage: fresh.numInPage,
-    };
-    const mod: any = await PluginFileAPI.modifyElements(
-      fresh.notePath, fresh.page, [modElement as any],
+    const ins: any = await PluginFileAPI.insertElements(
+      fresh.notePath, fresh.page, [newElement],
     );
-    if (mod && mod.success !== false) {
-      const idxs: any[] = mod?.result ?? [];
-      modifiedOk = Array.isArray(idxs) ? idxs.length > 0 : true;
+    console.log('[embedimage] insertElements ->', JSON.stringify(ins));
+    if (ins && ins.success !== false) {
+      insertOk = true;
+    } else {
+      insertErr = ins?.error?.message ?? 'insertElements rejected';
     }
-  } catch {
-    modifiedOk = false;
+  } catch (e: any) {
+    insertErr = e?.message ?? String(e);
+    console.log('[embedimage] insertElements threw:', insertErr);
   }
 
-  // Fallback path: insert-then-delete. This way a failed insert leaves
-  // the original embed untouched (the opposite of delete-then-insert).
-  if (!modifiedOk) {
-    try {
-      const ins: any = await PluginFileAPI.insertElements(
-        fresh.notePath, fresh.page, [elementBase as any],
-      );
-      if (ins && ins.success === false) {
-        throw new Error(ins?.error?.message ?? 'insertElements failed');
-      }
-    } catch (e: any) {
-      throw new Error(`insert failed (original embed kept): ${e?.message ?? e}`);
+  if (!insertOk) {
+    // Fallback: insertImage uses the host's default position so we
+    // lose the rect, but the user at least sees a fresh frame. They
+    // can re-position with the lasso afterwards.
+    console.log('[embedimage] insertElements failed (', insertErr, ') — falling back to insertImage');
+    const img: any = await PluginNoteAPI.insertImage(newPngPath);
+    console.log('[embedimage] insertImage ->', JSON.stringify(img));
+    if (!img || img.success === false) {
+      throw new Error(`insert failed (original embed kept): ${img?.error?.message ?? insertErr ?? 'unknown'}`);
     }
-    // Only delete the old one once the new one is safely in place.
-    try {
-      await PluginFileAPI.deleteElements(fresh.notePath, fresh.page, [fresh.numInPage]);
-    } catch {
-      // Non-fatal: user now has two pictures; better than zero.
-    }
+  }
+
+  // Only delete the old embed now that something has been re-inserted.
+  try {
+    const del: any = await PluginFileAPI.deleteElements(
+      fresh.notePath, fresh.page, [fresh.numInPage],
+    );
+    console.log('[embedimage] deleteElements ->', JSON.stringify(del));
+  } catch (e: any) {
+    console.log('[embedimage] deleteElements threw:', e?.message ?? e);
+    // Non-fatal: user now sees two pictures, better than zero.
   }
 
   try {
     await PluginNoteAPI.saveCurrentNote();
-  } catch {}
+  } catch (e: any) {
+    console.log('[embedimage] saveCurrentNote threw:', e?.message ?? e);
+  }
 
   let newTrack: EmbedTrack | null = null;
   try {
     const lastRes: any = await PluginFileAPI.getLastElement();
     const el = lastRes?.result ?? lastRes;
+    console.log('[embedimage] getLastElement after replace ->', JSON.stringify(el)?.slice(0, 400));
     newTrack = fromElement(fresh.notePath, fresh.page, el);
-  } catch {
+  } catch (e: any) {
+    console.log('[embedimage] getLastElement threw:', e?.message ?? e);
     newTrack = null;
   }
-  // If modifyElements worked the uuid stays the same and getLastElement
-  // may return a different element (e.g. an ink stroke added after);
-  // fall back to the existing track so the next Replace still works.
-  if (!newTrack && modifiedOk) newTrack = fresh;
   if (newTrack) await saveEmbedTrack(newTrack).catch(() => {});
   return newTrack;
 }
