@@ -4,6 +4,7 @@ import App from './App';
 import { name as appName } from './app.json';
 import { runSendLassoToMac } from './src/lassoExport';
 import { loadStreamConfig } from './src/storage';
+import { setPendingButton } from './pendingButton';
 
 AppRegistry.registerComponent(appName, () => App);
 
@@ -90,12 +91,20 @@ PluginManager.registerButton(2, ['NOTE'], {
 PluginManager.registerButtonListener({
   onButtonPress: (msg) => {
     // showType:0 buttons don't open a view, so we handle their action
-    // here in the headless context. The other buttons (showType:1) are
-    // routed by App.tsx after the view opens.
+    // here in the headless context.
     if (msg?.id === BUTTON_LASSO_SEND) {
       loadStreamConfig()
         .then((cfg) => runSendLassoToMac(cfg.lassoFormat ?? 'png'))
         .catch(() => {});
+      return;
+    }
+    // showType:1 buttons open the plugin view. We stash the button id
+    // synchronously so App.tsx's initial render can route to the
+    // right screen instead of briefly flashing the default Browser.
+    // The SDK *also* replays the event into App.tsx's listener, but
+    // that's racy on cold reload — pendingButton wins.
+    if (msg?.id !== undefined && msg?.id !== null) {
+      setPendingButton(msg.id);
     }
   },
 });

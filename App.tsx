@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { PluginManager } from 'sn-plugin-lib';
+import { checkPendingButton } from './pendingButton';
 import { ImageProcessor } from './src/imageProcessor';
 import { BrowserScreen } from './src/screens/Browser';
 import { CaptureScreen } from './src/screens/Capture';
@@ -21,8 +22,21 @@ const BUTTON_DROP = 3;
 const BUTTON_LASSO_RECOGNIZE = 5;
 const BUTTON_LASSO_STITCH_LAYERS = 6;
 
+function initialScreenFromPendingButton(): Screen {
+  // Inkling pattern: index.js's button listener stores the pressed id
+  // in a module variable before App mounts. Reading it synchronously
+  // here means we render the right screen on the FIRST frame, instead
+  // of briefly flashing Browser before useEffect's listener fires.
+  const id = checkPendingButton();
+  if (id === BUTTON_REFRESH) return 'refresh';
+  if (id === BUTTON_DROP) return 'dropinbox';
+  if (id === BUTTON_LASSO_RECOGNIZE) return 'recognizelasso';
+  if (id === BUTTON_LASSO_STITCH_LAYERS) return 'layerstitch';
+  return 'browser';
+}
+
 export default function App(): React.JSX.Element {
-  const [screen, setScreen] = useState<Screen>('browser');
+  const [screen, setScreen] = useState<Screen>(() => initialScreenFromPendingButton());
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [streamConfig, setStreamConfig] = useState<StreamConfig>(DEFAULT_STREAM_CONFIG);
   const [stitchSession, setStitchSession] = useState<StitchSession | null>(null);

@@ -39,10 +39,6 @@ export async function surveyLasso(): Promise<LassoSurvey | null> {
   if (!elRes?.success || !Array.isArray(elRes.result)) return null;
   const elements: any[] = elRes.result;
 
-  const lyRes: any = await PluginFileAPI.getLayers(notePath, page);
-  if (!lyRes?.success || !Array.isArray(lyRes.result)) return null;
-  const rawLayers: any[] = lyRes.result;
-
   const elementsByLayer = new Map<number, any[]>();
   for (const el of elements) {
     const ln = (el?.layerNum ?? 0) as number;
@@ -50,7 +46,21 @@ export async function surveyLasso(): Promise<LassoSurvey | null> {
     elementsByLayer.get(ln)!.push(el);
   }
 
-  const layers: LayerInfo[] = rawLayers
+  // Try getLayers first — gives us proper names + visibility. If it
+  // fails or returns nothing usable, fall back to whatever layerNums
+  // appear in the lasso so the user still has something to pick from.
+  let rawLayers: any[] = [];
+  try {
+    const lyRes: any = await PluginFileAPI.getLayers(notePath, page);
+    if (lyRes?.success && Array.isArray(lyRes.result)) {
+      rawLayers = lyRes.result;
+    }
+    FileLogger.log('LayerStitch', 'getLayers ->', { success: lyRes?.success, n: rawLayers.length });
+  } catch (e: any) {
+    FileLogger.log('LayerStitch', 'getLayers threw', e?.message ?? String(e));
+  }
+
+  let layers: LayerInfo[] = rawLayers
     .map((l: any) => {
       const id = (l.layerId !== undefined ? l.layerId : l.layerNum) as number;
       return {
@@ -64,8 +74,30 @@ export async function surveyLasso(): Promise<LassoSurvey | null> {
     .filter((l) => l.layerId >= 0)
     .sort((a, b) => a.layerId - b.layerId);
 
+  if (layers.length === 0) {
+    // Fallback: infer layers from the lassoed elements' layerNums.
+    // Always include layer 0 (main) so the user has at least one row.
+    const ids = new Set<number>([0]);
+    for (const ln of elementsByLayer.keys()) {
+      if (ln >= 0) ids.add(ln);
+    }
+    layers = Array.from(ids)
+      .sort((a, b) => a - b)
+      .map((id) => ({
+        layerId: id,
+        name: `Layer ${id + 1}`,
+        isCurrent: id === 0,
+        isVisible: true,
+        count: elementsByLayer.get(id)?.length ?? 0,
+      }));
+    FileLogger.log('LayerStitch', 'using inferred layers', { ids: Array.from(ids) });
+  }
+
   FileLogger.log('LayerStitch', 'surveyLasso', {
     notePath, page, rect, layerCount: layers.length, totalEls: elements.length,
+    elementsByLayer: Object.fromEntries(
+      Array.from(elementsByLayer.entries()).map(([k, v]) => [k, v.length]),
+    ),
   });
 
   return { notePath, page, rect, layers, elementsByLayer };
