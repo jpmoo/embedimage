@@ -36,9 +36,11 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
 
     (async () => {
       try {
+        console.log('[embedimage] SendLasso start');
         setStatus('Loading config…');
         const cfg = await loadStreamConfig();
         const url = baseUrl(cfg);
+        console.log('[embedimage] SendLasso url=', url);
         if (!url) {
           setStatus('No Mac server set. Settings → Mac Capture Server.');
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
@@ -46,42 +48,45 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         }
         if (cancelled) return;
         setStatus('Exporting lasso…');
-        // The plugin process can write into the pluginhost's own cache
-        // dir; /data/local/tmp is adb-shell-only so the SDK silently
-        // fails to write there.
         const tmpPath = `/data/user/0/com.ratta.supernote.pluginhost/cache/lasso_${Date.now()}.png`;
+        console.log('[embedimage] SendLasso generateLassoPreview ->', tmpPath);
         let res: any;
         try {
           res = await PluginCommAPI.generateLassoPreview(tmpPath);
+          console.log('[embedimage] SendLasso generateLassoPreview returned:', JSON.stringify(res));
         } catch (e: any) {
+          console.log('[embedimage] SendLasso generateLassoPreview threw:', e?.message ?? e);
           setStatus(`Lasso export failed: ${e?.message ?? e}`);
-          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);
           return;
         }
         if (!res || res.success === false) {
           const msg = res?.error?.message ?? 'no lasso content';
+          console.log('[embedimage] SendLasso lasso empty:', msg);
           setStatus(`Lasso empty: ${msg}\n(Lasso something first, then tap again.)`);
-          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3500);
           return;
         }
         const resultPath: string =
           typeof res?.result === 'string' ? res.result :
           (res?.result?.path ?? tmpPath);
+        console.log('[embedimage] SendLasso resultPath=', resultPath);
         if (cancelled) return;
         setPreviewUri('file://' + resultPath);
         setStatus('Uploading to Mac…');
         const name = `manta_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-        await lanPostFile(`${url}/sketch?name=${encodeURIComponent(name)}`, resultPath, 'image/png', 30000);
+        console.log('[embedimage] SendLasso POST', `${url}/sketch?name=${name}`);
+        const out = await lanPostFile(`${url}/sketch?name=${encodeURIComponent(name)}`, resultPath, 'image/png', 30000);
+        console.log('[embedimage] SendLasso upload ok, response saved at', out);
         if (cancelled) return;
         setStatus(`Sent to Mac as ${name}`);
         setDone(true);
-        // Auto-close after a brief confirm so the user doesn't have to
-        // tap OK every time.
         setTimeout(() => PluginManager.closePluginView().catch(() => {}), 1500);
       } catch (e: any) {
+        console.log('[embedimage] SendLasso outer threw:', e?.message ?? e);
         if (cancelled) return;
         setStatus(`Failed: ${e?.message ?? e}`);
-        setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
+        setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);
       }
     })();
     return () => {

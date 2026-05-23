@@ -70,46 +70,64 @@ export async function insertAndTrack(pngPath: string): Promise<EmbedTrack | null
   return track;
 }
 
-// Re-fetch the tracked element so we pick up any rect changes from the lasso.
-async function refreshTrackRect(track: EmbedTrack): Promise<EmbedTrack> {
-  if (!track.uuid) return track;
+// Re-fetch the tracked element so we pick up any rect changes from the lasso,
+// AND return the raw SDK element so callers can clone it verbatim. Picture
+// elements have a bunch of fields (maxX, maxY, thickness, status,
+// recognizeResult, ...) that the host validates on insertElements — we
+// learned the hard way that omitting them gets HTTP 106 "Invalid API
+// parameters".
+async function refreshTrackAndRaw(
+  track: EmbedTrack,
+): Promise<{ track: EmbedTrack; raw: any | null }> {
+  if (!track.uuid) return { track, raw: null };
   try {
     const res: any = await PluginFileAPI.getElements(track.page, track.notePath);
     const list: any[] = res?.result ?? (Array.isArray(res) ? res : []);
     const found = list.find((e) => e?.uuid === track.uuid);
-    if (!found) return track;
+    if (!found) return { track, raw: null };
     const fresh = fromElement(track.notePath, track.page, found);
-    return fresh ?? track;
+    return { track: fresh ?? track, raw: found };
   } catch {
-    return track;
+    return { track, raw: null };
   }
 }
 
 export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Promise<EmbedTrack | null> {
-  const fresh = await refreshTrackRect(track);
+  const { track: fresh, raw } = await refreshTrackAndRaw(track);
   console.log('[embedimage] replaceInPlace start', {
     notePath: fresh.notePath, page: fresh.page,
     numInPage: fresh.numInPage, layerNum: fresh.layerNum,
     uuid: fresh.uuid, rect: fresh.rect, newPngPath,
+    rawKeys: raw ? Object.keys(raw) : null,
   });
 
-  const newElement: any = {
-    type: 200, // Element.TYPE_PICTURE
-    pageNum: fresh.page,
-    layerNum: fresh.layerNum,
-    picture: {
-      picturePath: newPngPath,
-      rect: { ...fresh.rect },
-    },
-  };
+  // Clone the existing element verbatim and only swap the picture path
+  // (and clear identity fields so the host treats it as a fresh insert).
+  // Falling back to a minimal element is what was getting rejected as
+  // "Invalid API parameters" — picture elements require maxX/maxY/
+  // status/recognizeResult etc. that we don't synthesize correctly.
+  let newElement: any;
+  if (raw) {
+    newElement = JSON.parse(JSON.stringify(raw));
+    delete newElement.uuid;        // host assigns a fresh one
+    delete newElement.numInPage;   // host assigns a fresh one
+    if (newElement.picture) {
+      newElement.picture.picturePath = newPngPath;
+    } else {
+      newElement.picture = { picturePath: newPngPath, rect: { ...fresh.rect } };
+    }
+  } else {
+    newElement = {
+      type: 200,
+      pageNum: fresh.page,
+      layerNum: fresh.layerNum,
+      picture: {
+        picturePath: newPngPath,
+        rect: { ...fresh.rect },
+      },
+    };
+  }
 
-  // Insert the new picture FIRST. We learned the hard way that the
-  // opposite order (delete then insert) can leave the user with no
-  // embed at all if the insert step silently fails. We also avoid the
-  // modifyElements path entirely — the SDK accepted it on 0.7.4 logs
-  // but the displayed picture never repainted (the renderer caches the
-  // bitmap by element identity and a path-only change doesn't
-  // invalidate that cache).
   let insertOk = false;
   let insertErr: any = null;
   try {
@@ -128,18 +146,13 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
   }
 
   if (!insertOk) {
-    // Fallback: insertImage uses the host's default position so we
-    // lose the rect, but the user at least sees a fresh frame. They
-    // can re-position with the lasso afterwards.
-    console.log('[embedimage] insertElements failed (', insertErr, ') — falling back to insertImage');
-    const img: any = await PluginNoteAPI.insertImage(newPngPath);
-    console.log('[embedimage] insertImage ->', JSON.stringify(img));
-    if (!img || img.success === false) {
-      throw new Error(`insert failed (original embed kept): ${img?.error?.message ?? insertErr ?? 'unknown'}`);
-    }
+    // insertImage fallback is unreliable — it placed the new picture
+    // with pageNum=-1 in observed runs, so the user doesn't see it.
+    // Keep the original embed in that case.
+    console.log('[embedimage] insertElements failed (', insertErr, ') — leaving original embed in place');
+    throw new Error(`insert failed (original embed kept): ${insertErr ?? 'unknown'}`);
   }
 
-  // Only delete the old embed now that something has been re-inserted.
   try {
     const del: any = await PluginFileAPI.deleteElements(
       fresh.notePath, fresh.page, [fresh.numInPage],
@@ -147,7 +160,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     console.log('[embedimage] deleteElements ->', JSON.stringify(del));
   } catch (e: any) {
     console.log('[embedimage] deleteElements threw:', e?.message ?? e);
-    // Non-fatal: user now sees two pictures, better than zero.
+    // Non-fatal: user has two pictures, better than zero.
   }
 
   try {
