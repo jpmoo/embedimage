@@ -1,9 +1,9 @@
 {
   "name": "Embed Image",
-  "desc": "Browse PNG/JPEG files in Document/Images, preview with adjustable fade, and embed into the current note.",
+  "desc": "Browse images (incl. WebDAV/SD), preview with fade/brightness/contrast/gamma, and embed into the current note.",
   "iconPath": "./assets/icon.png",
-  "versionName": "0.3.0",
-  "versionCode": "8",
+  "versionName": "0.4.0",
+  "versionCode": "9",
   "pluginID": "embedimagev0001a",
   "pluginKey": "embedimage",
   "jsMainPath": "index"

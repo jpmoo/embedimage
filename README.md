@@ -2,19 +2,26 @@
 
 > Vibe-coded with Claude Code. Read the diffs before trusting it on a device you care about.
 
-Adds an **Embed Image** button to the plugins area of the sidebar in the NOTE editor. Tapping it opens a browser of PNG/JPEG files in `Document/Images` (auto-created if absent) with thumbnails, filenames, and a sort selector (Newest — default, Oldest, Name). Tapping a thumbnail opens a preview with a fade-to-white slider; tap **Insert** to embed it into the current note on the current layer (reposition or resize afterward with the lasso tool).
+Adds an **Embed Image** button to the plugins area of the sidebar in the NOTE editor. Tapping it opens a file browser starting at `Document/Images` (auto-created if absent). Tap folders to navigate, **Up** / **Home** to jump around, or **Browse…** to open the device's native file picker — which includes mounted **WebDAV** servers and the **SD card**. Tap a thumbnail to open the preview, adjust, then **Insert** into the current note on the current layer (reposition or resize afterward with the lasso tool).
 
-**Fade slider.** 0 % = original image, 100 % = pure white. Useful for image references on e-ink — pick a high fade so your strokes stand out against a ghosted reference. The fade is baked into a temporary PNG before insert.
+**Supported formats.** PNG, JPEG, BMP, GIF (first frame), WEBP. PNGs with no adjustments are inserted as-is. Everything else is decoded and re-encoded to PNG in the app cache before being handed to `PluginNoteAPI.insertImage`, which is PNG-only.
 
-**JPEG support.** PNGs are embedded directly when fade = 0. JPEGs (and any image with fade > 0) are decoded and re-encoded as PNG in the app cache before being handed to `PluginNoteAPI.insertImage`, which is PNG-only.
+**Preview adjustments.**
+
+- **Fade to white** — 0 % = original, 100 % = pure white. For tracing references on e-ink: pick a high fade so your strokes stand out against a ghosted reference.
+- **Brightness** — −100 .. +100, linear offset.
+- **Contrast** — −100 .. +100, scaled around the midpoint.
+- **Gamma** — 0.5 .. 2.0, per-channel LUT.
+
+The preview re-bakes (downsampled to 800 px) ~350 ms after the last slider change to keep e-ink refresh manageable. The full-resolution bake happens on **Insert**.
 
 ## Layout
 
 - `PluginConfig.json` — plugin manifest (id, name, icon, version)
 - `index.js` — registers the sidebar button via `PluginManager.registerButton(1, ['NOTE'], …)`
-- `App.tsx` — full-screen picker UI (thumbnail grid + sort, preview with fade slider)
+- `App.tsx` — full-screen picker UI (folder navigator + system-picker handoff, preview with fade / brightness / contrast / gamma sliders)
 - `assets/icon.png` — sidebar button icon (pre-rendered from the source SVG)
-- `android/` — RN Android shell. `StubPackage` registers the `ImageProcessor` native module (Bitmap → white-overlay → PNG bake) and forces `buildCustomApkDebug` so the package includes an `app.npk` (required for the plugin's RN runtime to load on-device)
+- `android/` — RN Android shell. `StubPackage` registers the `ImageProcessor` native module (decode → B/C/gamma LUT → white-overlay → PNG bake, with optional downsample for previews) and forces `buildCustomApkDebug` so the package includes an `app.npk` (required for the plugin's RN runtime to load on-device)
 - `buildPlugin.sh` — bundles JS + native APK + manifest into `build/outputs/embedimage.snplg`
 
 ## Build & install
