@@ -20,8 +20,8 @@ type EntryKind = 'image' | 'folder';
 type Entry = { name: string; path: string; kind: EntryKind };
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
-const ROOT = '/storage/emulated/0';
-const DEFAULT_DIR = ROOT + '/Document/Images';
+const INTERNAL_ROOT = '/storage/emulated/0';
+const DEFAULT_DIR = INTERNAL_ROOT + '/Document/Images';
 const PREVIEW_MAX_DIM = 800;
 const MIN_COLUMNS = 2;
 const MAX_COLUMNS = 6;
@@ -218,6 +218,7 @@ export default function App(): React.JSX.Element {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [sort, setSort] = useState<SortKey>('date_desc');
   const [columns, setColumns] = useState<number>(DEFAULT_COLUMNS);
+  const [sdRoots, setSdRoots] = useState<string[]>([]);
   const [status, setStatus] = useState<string>('starting…');
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Entry | null>(null);
@@ -294,6 +295,33 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     ImageProcessor?.cleanupCache?.().catch(() => {});
   }, []);
+
+  // Probe for SD card / external storage mounts once on open.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res: any = await (FileUtils as any).getExternalDirPath?.();
+        if (cancelled) return;
+        const list: string[] = Array.isArray(res)
+          ? res.filter((p) => typeof p === 'string' && p && p !== INTERNAL_ROOT)
+          : [];
+        setSdRoots(list);
+      } catch {
+        // device may not expose any external storage; ignore.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const allRoots = useMemo(() => [INTERNAL_ROOT, ...sdRoots], [sdRoots]);
+  const currentRoot = useMemo(() => {
+    return (
+      allRoots.find((r) => currentDir === r || currentDir.startsWith(r + '/')) ?? INTERNAL_ROOT
+    );
+  }, [allRoots, currentDir]);
 
   // Debounced preview bake. Reuses the source path when all sliders are at
   // defaults and the source is already PNG.
@@ -436,14 +464,14 @@ export default function App(): React.JSX.Element {
   }, [selected, fade, brightness, contrast, gamma, busy]);
 
   const navigateUp = useCallback(() => {
-    if (currentDir === ROOT) return;
+    if (currentDir === currentRoot) return;
     const p = parentDir(currentDir);
-    if (!p.startsWith(ROOT)) {
-      setCurrentDir(ROOT);
-    } else {
+    if (p === currentRoot || p.startsWith(currentRoot + '/')) {
       setCurrentDir(p);
+    } else {
+      setCurrentDir(currentRoot);
     }
-  }, [currentDir]);
+  }, [currentDir, currentRoot]);
 
   const goHome = useCallback(() => setCurrentDir(DEFAULT_DIR), []);
 
@@ -538,7 +566,7 @@ export default function App(): React.JSX.Element {
     );
   }
 
-  const canGoUp = currentDir !== ROOT;
+  const canGoUp = currentDir !== currentRoot;
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
@@ -559,6 +587,27 @@ export default function App(): React.JSX.Element {
         <Pressable style={styles.btn} onPress={goHome}>
           <Text style={styles.btnTxt}>Home</Text>
         </Pressable>
+        <Pressable
+          style={[styles.btn, currentRoot === INTERNAL_ROOT && styles.btnActive]}
+          onPress={() => setCurrentDir(INTERNAL_ROOT)}
+        >
+          <Text style={[styles.btnTxt, currentRoot === INTERNAL_ROOT && styles.btnTxtPrimary]}>
+            Internal
+          </Text>
+        </Pressable>
+        {sdRoots.map((r, i) => {
+          const active = currentRoot === r;
+          const label = sdRoots.length > 1 ? `SD ${i + 1}` : 'SD';
+          return (
+            <Pressable
+              key={r}
+              style={[styles.btn, active && styles.btnActive]}
+              onPress={() => setCurrentDir(r)}
+            >
+              <Text style={[styles.btnTxt, active && styles.btnTxtPrimary]}>{label}</Text>
+            </Pressable>
+          );
+        })}
         <Text style={styles.pathTxt} numberOfLines={1} ellipsizeMode="head">
           {currentDir}
         </Text>
@@ -679,6 +728,7 @@ const styles = StyleSheet.create({
   chipTxt: { fontSize: 14, color: '#000' },
   chipTxtActive: { color: '#fff' },
   btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
+  btnActive: { backgroundColor: '#000' },
   btnTxt: { fontSize: 14, color: '#000' },
   btnTxtMuted: { color: '#999' },
   btnTxtPrimary: { color: '#fff' },
