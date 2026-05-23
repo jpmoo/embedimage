@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { PluginManager } from 'sn-plugin-lib';
 import { checkPendingButton } from './pendingButton';
 import { ImageProcessor } from './src/imageProcessor';
+import { FileLogger } from './src/util/FileLogger';
 import { BrowserScreen } from './src/screens/Browser';
 import { CaptureScreen } from './src/screens/Capture';
 import { DropInbox } from './src/screens/DropInbox';
@@ -24,17 +25,15 @@ const BUTTON_LASSO_STITCH_LAYERS = 6;     // lasso-toolbar entry
 const BUTTON_STITCH_LAYERS_SIDE = 7;      // sidebar entry (always-visible duplicate)
 
 function initialScreenFromPendingButton(): Screen {
-  // Inkling pattern: index.js's button listener stores the pressed id
-  // in a module variable before App mounts. Reading it synchronously
-  // here means we render the right screen on the FIRST frame, instead
-  // of briefly flashing Browser before useEffect's listener fires.
   const id = checkPendingButton();
-  if (id === BUTTON_REFRESH) return 'refresh';
-  if (id === BUTTON_DROP) return 'dropinbox';
-  if (id === BUTTON_LASSO_RECOGNIZE) return 'recognizelasso';
-  if (id === BUTTON_LASSO_STITCH_LAYERS) return 'layerstitch';
-  if (id === BUTTON_STITCH_LAYERS_SIDE) return 'layerstitch';
-  return 'browser';
+  let chosen: Screen = 'browser';
+  if (id === BUTTON_REFRESH) chosen = 'refresh';
+  else if (id === BUTTON_DROP) chosen = 'dropinbox';
+  else if (id === BUTTON_LASSO_RECOGNIZE) chosen = 'recognizelasso';
+  else if (id === BUTTON_LASSO_STITCH_LAYERS) chosen = 'layerstitch';
+  else if (id === BUTTON_STITCH_LAYERS_SIDE) chosen = 'layerstitch';
+  FileLogger.raw('[embedimage] App initialScreen', { pendingId: id, chosen });
+  return chosen;
 }
 
 export default function App(): React.JSX.Element {
@@ -44,6 +43,7 @@ export default function App(): React.JSX.Element {
   const [stitchSession, setStitchSession] = useState<StitchSession | null>(null);
 
   useEffect(() => {
+    FileLogger.raw('[embedimage] App mounted');
     ImageProcessor?.cleanupCache?.().catch(() => {});
     (async () => {
       const cfg = await loadStreamConfig();
@@ -52,6 +52,7 @@ export default function App(): React.JSX.Element {
 
     const sub = PluginManager.registerButtonListener({
       onButtonPress: (msg: any) => {
+        FileLogger.raw('[embedimage] App onButtonPress', { id: msg?.id });
         if (msg?.id === BUTTON_REFRESH) setScreen('refresh');
         else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
         else if (msg?.id === BUTTON_LASSO_RECOGNIZE) setScreen('recognizelasso');
