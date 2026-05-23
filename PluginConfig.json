@@ -2,8 +2,8 @@
   "name": "Embed Image",
   "desc": "Browse images (incl. WebDAV/SD), preview with fade/brightness/contrast/gamma, and embed into the current note.",
   "iconPath": "./assets/icon.png",
-  "versionName": "0.4.2",
-  "versionCode": "11",
+  "versionName": "0.5.0",
+  "versionCode": "12",
   "pluginID": "embedimagev0001a",
   "pluginKey": "embedimage",
   "jsMainPath": "index"

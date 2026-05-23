@@ -8,14 +8,12 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-// Decodes the source (PNG/JPEG/BMP/GIF/WEBP), applies brightness +
-// contrast (linear), gamma (per-channel LUT), and a final white-tint
-// overlay that preserves alpha, then writes a PNG to the app cache.
-// PluginNoteAPI.insertImage is PNG-only, so we always emit PNG.
 class ImageProcessorModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
@@ -31,6 +29,60 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         previewMaxDim: Int,
         promise: Promise,
     ) {
+        try {
+            val outPath = bake(inputPath, whiteAlpha, brightness, contrast, gamma, previewMaxDim)
+            promise.resolve(outPath)
+        } catch (e: Throwable) {
+            promise.reject("E_PROCESS", e.message ?: e.toString(), e)
+        }
+    }
+
+    // Fetch a URL, write the body to cache, run the same bake pipeline, return
+    // the baked PNG path. Used by the live-capture screen so the streaming
+    // pipeline is one native call per frame instead of fetch-in-JS + bake.
+    @ReactMethod
+    fun downloadAndProcess(
+        url: String,
+        whiteAlpha: Double,
+        brightness: Int,
+        contrast: Int,
+        gamma: Double,
+        previewMaxDim: Int,
+        timeoutMs: Int,
+        promise: Promise,
+    ) {
+        var dlFile: File? = null
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.requestMethod = "GET"
+            conn.doInput = true
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                throw RuntimeException("HTTP $code")
+            }
+            dlFile = File(reactApplicationContext.cacheDir, "dl_${System.currentTimeMillis()}.bin")
+            conn.inputStream.use { input ->
+                FileOutputStream(dlFile).use { out -> input.copyTo(out) }
+            }
+            val outPath = bake(dlFile.absolutePath, whiteAlpha, brightness, contrast, gamma, previewMaxDim)
+            promise.resolve(outPath)
+        } catch (e: Throwable) {
+            promise.reject("E_DOWNLOAD", e.message ?: e.toString(), e)
+        } finally {
+            dlFile?.delete()
+        }
+    }
+
+    private fun bake(
+        inputPath: String,
+        whiteAlpha: Double,
+        brightness: Int,
+        contrast: Int,
+        gamma: Double,
+        previewMaxDim: Int,
+    ): String {
         var src: Bitmap? = null
         try {
             val decodeOpts = BitmapFactory.Options().apply {
@@ -54,7 +106,6 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
             val pixels = IntArray(w * h)
             src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-            // Pre-compute gamma LUT.
             val g = if (gamma <= 0.0) 1.0 else gamma
             val invG = 1.0 / g
             val gammaLut = IntArray(256)
@@ -62,7 +113,6 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
                 gammaLut[i] = (255.0 * (i / 255.0).pow(invG)).toInt().coerceIn(0, 255)
             }
 
-            // contrast: -100..100 → factor 0..2 around midpoint 128.
             val contrastFactor = ((contrast.coerceIn(-100, 100) + 100).toDouble()) / 100.0
             val brightnessAdjust = brightness.coerceIn(-100, 100)
 
@@ -103,9 +153,7 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
                 out.compress(Bitmap.CompressFormat.PNG, 100, stream)
             }
             out.recycle()
-            promise.resolve(outFile.absolutePath)
-        } catch (e: Throwable) {
-            promise.reject("E_PROCESS", e.message ?: e.toString(), e)
+            return outFile.absolutePath
         } finally {
             src?.recycle()
         }
@@ -116,8 +164,6 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         return min(255, max(0, v))
     }
 
-    // Deletes prev_*.png / embed_*.png left over from previous sessions so
-    // the cache doesn't grow unbounded across launches.
     @ReactMethod
     fun cleanupCache(promise: Promise) {
         try {
@@ -125,13 +171,41 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
             var n = 0
             dir.listFiles()?.forEach { f ->
                 val name = f.name
-                if ((name.startsWith("prev_") || name.startsWith("embed_")) && name.endsWith(".png")) {
+                if ((name.startsWith("prev_") || name.startsWith("embed_") || name.startsWith("dl_")) &&
+                    (name.endsWith(".png") || name.endsWith(".bin"))) {
                     if (f.delete()) n++
                 }
             }
             promise.resolve(n)
         } catch (e: Throwable) {
             promise.reject("E_CLEANUP", e.message ?: e.toString(), e)
+        }
+    }
+
+    // Persistent key/value config backed by SharedPreferences. The plugin's
+    // settings screen serializes its config as JSON under a single key.
+    private val prefs by lazy {
+        reactApplicationContext.getSharedPreferences("embedimage_prefs", android.content.Context.MODE_PRIVATE)
+    }
+
+    @ReactMethod
+    fun getConfigValue(key: String, promise: Promise) {
+        try {
+            promise.resolve(prefs.getString(key, null))
+        } catch (e: Throwable) {
+            promise.reject("E_CONFIG", e.message ?: e.toString(), e)
+        }
+    }
+
+    @ReactMethod
+    fun setConfigValue(key: String, value: String?, promise: Promise) {
+        try {
+            val editor = prefs.edit()
+            if (value == null) editor.remove(key) else editor.putString(key, value)
+            editor.apply()
+            promise.resolve(true)
+        } catch (e: Throwable) {
+            promise.reject("E_CONFIG", e.message ?: e.toString(), e)
         }
     }
 }
