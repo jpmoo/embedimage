@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -31,48 +31,72 @@ export function DropInbox({ onClose }: { onClose: () => void }): React.JSX.Eleme
   const [busy, setBusy] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
 
+  // Used by the prefetch loop to bail when the user navigates away or
+  // hits Refresh again — we don't want an old run's setState to clobber
+  // a newer one with stale results.
+  const refreshGen = useRef(0);
+
   const refresh = useCallback(async (u: string) => {
     if (!u) return;
-    setStatus('refreshing…');
+    const myGen = ++refreshGen.current;
+    setStatus('Refreshing…');
+    let list: DropItem[] = [];
     try {
-      const res: any = await lanJson('GET', `${u}/drop/list`, undefined, 3000);
-      const list: DropItem[] = Array.isArray(res?.items) ? res.items : [];
+      const res: any = await lanJson('GET', `${u}/drop/list`, undefined, 5000);
+      if (refreshGen.current !== myGen) return;
+      list = Array.isArray(res?.items) ? res.items : [];
       setItems(list);
       setFolder(String(res?.folder ?? ''));
       setStatus(`${list.length} item${list.length === 1 ? '' : 's'}`);
-      // Pre-fetch small thumbnails for the visible list.
-      const newThumbs: Record<string, string> = {};
-      for (const it of list.slice(0, 24)) {
-        try {
-          const path = await downloadAndBake(
-            `${u}/drop/file?name=${encodeURIComponent(it.name)}`,
-            DEFAULT_ADJUSTMENTS,
-            200, // small thumb
-            8000,
-          );
-          newThumbs[it.name] = 'file://' + path;
-        } catch {
-          // skip; show name only
-        }
-      }
-      setThumbs(newThumbs);
     } catch (e: any) {
-      setStatus(`failed: ${e?.message ?? e}`);
+      if (refreshGen.current !== myGen) return;
+      setStatus(`List failed: ${e?.message ?? e}`);
+      return;
+    }
+    // Pre-fetch small thumbnails for the visible list. Each fetch has
+    // its own short timeout; a single dead file can't stall the row.
+    const newThumbs: Record<string, string> = {};
+    for (const it of list.slice(0, 24)) {
+      if (refreshGen.current !== myGen) return;
+      try {
+        const path = await downloadAndBake(
+          `${u}/drop/file?name=${encodeURIComponent(it.name)}`,
+          DEFAULT_ADJUSTMENTS,
+          200,
+          5000,
+        );
+        if (refreshGen.current !== myGen) return;
+        newThumbs[it.name] = 'file://' + path;
+        setThumbs((prev) => ({ ...prev, [it.name]: 'file://' + path }));
+      } catch {
+        // skip; tile shows the placeholder.
+      }
     }
   }, []);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const cfg = await loadStreamConfig();
-      const u = baseUrl(cfg);
-      setUrl(u);
-      if (u) refresh(u);
-      else setStatus('no server configured');
+      try {
+        const cfg = await loadStreamConfig();
+        if (!alive) return;
+        const u = baseUrl(cfg);
+        setUrl(u);
+        if (u) refresh(u);
+        else setStatus('no server configured');
+      } catch (e: any) {
+        if (!alive) return;
+        setStatus(`init failed: ${e?.message ?? e}`);
+      }
     })();
+    return () => {
+      alive = false;
+      refreshGen.current++; // invalidate any in-flight refresh
+    };
   }, [refresh]);
 
   const onInsert = useCallback(async (it: DropItem) => {
-    if (busy) return;
+    if (busy || !url) return;
     setBusy(true);
     setStatus(`embedding ${it.name}…`);
     try {
@@ -83,11 +107,13 @@ export function DropInbox({ onClose }: { onClose: () => void }): React.JSX.Eleme
         15000,
       );
       await insertAndTrack(path);
-      // Consume on the Mac (moves it to .consumed/) and refresh.
+      // Consume on the Mac (moves it to .consumed/). Best-effort; if it
+      // fails the file just shows up again on next Refresh which is
+      // harmless.
       await lanHttp('POST', `${url}/drop/consume`, { name: it.name }, 3000).catch(() => {});
       await PluginManager.closePluginView().catch(() => {});
     } catch (e: any) {
-      setStatus(`insert failed: ${e?.message ?? e}`);
+      setStatus(`Insert failed: ${e?.message ?? e}`);
       setBusy(false);
     }
   }, [busy, url]);

@@ -25,26 +25,49 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
 
   useEffect(() => {
     let cancelled = false;
+
+    const WATCHDOG_MS = 20000;
+    const watchdog = setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      setStatus('Timed out. Closing…');
+      setTimeout(() => PluginManager.closePluginView().catch(() => {}), 1500);
+    }, WATCHDOG_MS);
+
     (async () => {
       try {
+        setStatus('Loading config…');
         const cfg = await loadStreamConfig();
         const url = baseUrl(cfg);
         if (!url) {
           setStatus('No Mac server set. Settings → Mac Capture Server.');
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
           return;
         }
-        // Ask the SDK to write the lasso preview to a file we control.
-        const ts = Date.now();
-        // The plugin's sandbox cache is the safe place to write.
-        const tmpPath = `/data/user/0/com.ratta.supernote.pluginhost/files/plugins/embedimagev0001a/lasso_${ts}.png`;
-        const res: any = await PluginCommAPI.generateLassoPreview(tmpPath);
+        if (cancelled) return;
+        setStatus('Exporting lasso…');
+        // Ask the SDK to write the lasso preview. We pass a writable
+        // directory it can create files under; the SDK returns the
+        // actual file path it chose.
+        const tmpPath = `/data/local/tmp/lasso_${Date.now()}.png`;
+        let res: any;
+        try {
+          res = await PluginCommAPI.generateLassoPreview(tmpPath);
+        } catch (e: any) {
+          setStatus(`Lasso export failed: ${e?.message ?? e}`);
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
+          return;
+        }
         if (!res || res.success === false) {
-          setStatus(`No lasso content. Lasso something first, then tap again.`);
+          const msg = res?.error?.message ?? 'no lasso content';
+          setStatus(`Lasso empty: ${msg}\n(Lasso something first, then tap again.)`);
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);
           return;
         }
         const resultPath: string =
           typeof res?.result === 'string' ? res.result :
           (res?.result?.path ?? tmpPath);
+        if (cancelled) return;
         setPreviewUri('file://' + resultPath);
         setStatus('Uploading to Mac…');
         const name = `manta_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
@@ -52,12 +75,18 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         if (cancelled) return;
         setStatus(`Sent to Mac as ${name}`);
         setDone(true);
+        // Auto-close after a brief confirm so the user doesn't have to
+        // tap OK every time.
+        setTimeout(() => PluginManager.closePluginView().catch(() => {}), 1500);
       } catch (e: any) {
+        if (cancelled) return;
         setStatus(`Failed: ${e?.message ?? e}`);
+        setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
     };
   }, []);
 

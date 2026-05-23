@@ -27,8 +27,21 @@ export function RefreshScreen(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Hard ceiling on the whole flow. Without this, a single hung SDK
+    // call (insertAndTrack / replaceInPlace can stall on a bad note
+    // context) leaves the spinner running forever.
+    const WATCHDOG_MS = 15000;
+    const watchdog = setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      setStatus('Timed out. Closing…');
+      setTimeout(() => PluginManager.closePluginView().catch(() => {}), 1200);
+    }, WATCHDOG_MS);
+
     (async () => {
       try {
+        setStatus('Loading config…');
         const cfg = await loadStreamConfig();
         const url = baseUrl(cfg);
         if (!url) {
@@ -36,9 +49,12 @@ export function RefreshScreen(): React.JSX.Element {
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
           return;
         }
+        if (cancelled) return;
+        setStatus('Fetching frame from Mac…');
         const track = await loadEmbedTrack();
         const fullPath = await downloadAndBake(`${url}/frame`, DEFAULT_ADJUSTMENTS, 0, 8000);
         if (cancelled) return;
+        setStatus(track ? 'Replacing embed…' : 'Inserting…');
         if (track) {
           await replaceInPlace(track, fullPath);
         } else {
@@ -47,12 +63,14 @@ export function RefreshScreen(): React.JSX.Element {
         if (cancelled) return;
         await PluginManager.closePluginView().catch(() => {});
       } catch (e: any) {
+        if (cancelled) return;
         setStatus(`FAILED: ${e?.message ?? e}`);
         setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
     };
   }, []);
 

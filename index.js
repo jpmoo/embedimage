@@ -22,34 +22,37 @@ PluginManager.registerButton(1, ['NOTE'], {
   name: 'Embed Image',
   icon: ICON,
   showType: 1,
-});
+}).catch((e) => console.log('[embedimage] main button register failed:', e));
 
 PluginManager.registerButton(1, ['NOTE'], {
   id: BUTTON_REFRESH,
   name: 'Refresh Embed',
   icon: ICON,
   showType: 1,
-});
+}).catch((e) => console.log('[embedimage] refresh button register failed:', e));
 
 PluginManager.registerButton(1, ['NOTE'], {
   id: BUTTON_DROP,
   name: 'Drop Inbox',
   icon: ICON,
   showType: 1,
-});
+}).catch((e) => console.log('[embedimage] drop button register failed:', e));
 
 // Lasso-toolbar button (type=2). Appears when the user lasso-selects ink
-// on the page; tap to ship the selection to the Mac.
-try {
-  PluginManager.registerButton(2, ['NOTE'], {
-    id: BUTTON_LASSO_SEND,
-    name: 'Send to Mac',
-    icon: ICON,
-    showType: 1,
-  });
-} catch (e) {
-  // Older host versions may not support type=2; fall back silently.
-}
+// on the page; tap to ship the selection to the Mac. registerButton
+// returns a Promise, so a sync try/catch isn't enough — catch the
+// rejection so an older host that rejects the call doesn't end up with
+// a half-registered button confusing the lasso menu.
+Promise.resolve()
+  .then(() =>
+    PluginManager.registerButton(2, ['NOTE'], {
+      id: BUTTON_LASSO_SEND,
+      name: 'Send to Mac',
+      icon: ICON,
+      showType: 1,
+    }),
+  )
+  .catch((e) => console.log('[embedimage] lasso button register skipped:', e));
 
 PluginManager.registerButtonListener({
   onButtonPress: (_msg) => {
