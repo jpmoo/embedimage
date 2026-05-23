@@ -522,8 +522,13 @@ def _load_birefnet():
             else "cuda" if torch.cuda.is_available()
             else "cpu"
         )
-        model.to(device).eval()
-        log(f"BiRefNet ready on {device}")
+        # The published weights ship in fp16; on MPS this trips a
+        # "Input type (float) and bias type (c10::Half) should be the
+        # same" mismatch because torchvision's transforms produce fp32
+        # tensors. Force the whole model to fp32 — it's a few hundred
+        # MB instead of a few hundred, and accuracy is unchanged.
+        model = model.to(torch.float32).to(device).eval()
+        log(f"BiRefNet ready on {device} (fp32)")
         _BIREFNET = {"model": model, "device": device, "torch": torch}
         return _BIREFNET
 
@@ -543,9 +548,10 @@ def _birefnet_remove(img: Image.Image, bg: str) -> Image.Image:
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
     rgb = img.convert("RGB")
-    inp = tfm(rgb).unsqueeze(0).to(device)
+    model_dtype = next(model.parameters()).dtype
+    inp = tfm(rgb).unsqueeze(0).to(device=device, dtype=model_dtype)
     with torch.no_grad():
-        preds = model(inp)[-1].sigmoid().cpu()
+        preds = model(inp)[-1].sigmoid().to(dtype=torch.float32).cpu()
     mask = preds[0].squeeze()
     from PIL import Image as PI
     mask_pil = transforms.ToPILImage()(mask).resize(rgb.size, PI.BILINEAR)

@@ -1,6 +1,7 @@
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
+  Modal,
   Pressable,
   PressableProps,
   StyleSheet,
@@ -103,6 +104,28 @@ export type MenuSpec = { label: string; items: MenuItem[] };
 
 export function MenuBar({ menus }: { menus: MenuSpec[] }): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
+  // Pixel-position of the open menu label so the dropdown anchors to it.
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const labelRefs = useRef<Record<string, View | null>>({});
+
+  const openMenu = (label: string) => {
+    const ref = labelRefs.current[label];
+    if (ref) {
+      ref.measureInWindow((x, y, _w, h) => {
+        setAnchor({ x, y: y + h });
+        setOpen(label);
+      });
+    } else {
+      setOpen(label);
+    }
+  };
+
+  const close = () => {
+    setOpen(null);
+    setAnchor(null);
+  };
+
+  const items = open ? menus.find((m) => m.label === open)?.items ?? [] : [];
 
   return (
     <View style={styles.menuBarWrap}>
@@ -110,7 +133,8 @@ export function MenuBar({ menus }: { menus: MenuSpec[] }): React.JSX.Element {
         {menus.map((m) => (
           <Pressable
             key={m.label}
-            onPress={() => setOpen((o) => (o === m.label ? null : m.label))}
+            ref={(r) => { labelRefs.current[m.label] = r; }}
+            onPress={() => (open === m.label ? close() : openMenu(m.label))}
             style={[styles.menuLabel, open === m.label && styles.menuLabelOpen]}
           >
             <Text style={[styles.menuLabelText, open === m.label && styles.menuLabelTextOpen]}>
@@ -119,32 +143,51 @@ export function MenuBar({ menus }: { menus: MenuSpec[] }): React.JSX.Element {
           </Pressable>
         ))}
       </View>
-      {open ? (
-        <Win95Frame style={styles.menuDropdown}>
-          {(menus.find((m) => m.label === open)?.items ?? []).map((it, i) =>
-            it.separator ? (
-              <View key={i} style={styles.menuSeparator} />
-            ) : (
-              <Pressable
-                key={i}
-                disabled={it.disabled}
-                onPress={() => {
-                  setOpen(null);
-                  it.onPress?.();
-                }}
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  pressed && styles.menuItemPressed,
-                ]}
-              >
-                <Text style={[styles.menuItemText, it.disabled && styles.menuItemDisabled]}>
-                  {it.label}
-                </Text>
-              </Pressable>
-            ),
-          )}
-        </Win95Frame>
-      ) : null}
+      <Modal
+        visible={!!open}
+        transparent
+        animationType="none"
+        onRequestClose={close}
+        statusBarTranslucent
+      >
+        {/* Backdrop captures taps outside the menu so any tap closes it. */}
+        <Pressable style={styles.menuBackdrop} onPress={close}>
+          {/* Inner Pressable swallows the tap so clicks inside the
+              dropdown don't bubble to the backdrop and dismiss it. */}
+          <Pressable
+            onPress={() => {}}
+            style={[
+              styles.menuFloatingWrap,
+              anchor ? { top: anchor.y, left: anchor.x } : null,
+            ]}
+          >
+            <Win95Frame style={styles.menuDropdown}>
+              {items.map((it, i) =>
+                it.separator ? (
+                  <View key={i} style={styles.menuSeparator} />
+                ) : (
+                  <Pressable
+                    key={i}
+                    disabled={it.disabled}
+                    onPress={() => {
+                      close();
+                      it.onPress?.();
+                    }}
+                    style={({ pressed }) => [
+                      styles.menuItem,
+                      pressed && styles.menuItemPressed,
+                    ]}
+                  >
+                    <Text style={[styles.menuItemText, it.disabled && styles.menuItemDisabled]}>
+                      {it.label}
+                    </Text>
+                  </Pressable>
+                ),
+              )}
+            </Win95Frame>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -227,13 +270,11 @@ const styles = StyleSheet.create({
   menuLabelOpen: { backgroundColor: theme.selBg },
   menuLabelText: { fontFamily: PIXEL_FONT, fontSize: 16, color: theme.text },
   menuLabelTextOpen: { color: theme.selFg },
+  menuBackdrop: { flex: 1 },
+  menuFloatingWrap: { position: 'absolute' },
   menuDropdown: {
-    position: 'absolute',
-    top: 28, left: 4,
-    minWidth: 200,
+    minWidth: 220,
     paddingVertical: 2,
-    zIndex: 20,
-    elevation: 20,
   },
   menuItem: { paddingHorizontal: 16, paddingVertical: 4 },
   menuItemPressed: { backgroundColor: theme.selBg },
