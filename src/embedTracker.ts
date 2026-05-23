@@ -1,4 +1,5 @@
 import { PluginCommAPI, PluginFileAPI, PluginNoteAPI } from 'sn-plugin-lib';
+import { saveEmbedTrack } from './storage';
 import { EmbedTrack } from './types';
 
 // Tracks the most recently embedded Picture element so the live-capture
@@ -57,13 +58,16 @@ export async function insertAndTrack(pngPath: string): Promise<EmbedTrack | null
   } catch {}
   const ctx = await getCurrentContext();
   if (!ctx) return null;
+  let track: EmbedTrack | null = null;
   try {
     const lastRes: any = await PluginFileAPI.getLastElement();
     const el = lastRes?.result ?? lastRes;
-    return fromElement(ctx.notePath, ctx.page, el);
+    track = fromElement(ctx.notePath, ctx.page, el);
   } catch {
-    return null;
+    track = null;
   }
+  if (track) await saveEmbedTrack(track).catch(() => {});
+  return track;
 }
 
 // Re-fetch the tracked element so we pick up any rect changes from the lasso.
@@ -114,11 +118,14 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     await PluginNoteAPI.saveCurrentNote();
   } catch {}
 
+  let newTrack: EmbedTrack | null = null;
   try {
     const lastRes: any = await PluginFileAPI.getLastElement();
     const el = lastRes?.result ?? lastRes;
-    return fromElement(fresh.notePath, fresh.page, el);
+    newTrack = fromElement(fresh.notePath, fresh.page, el);
   } catch {
-    return null;
+    newTrack = null;
   }
+  if (newTrack) await saveEmbedTrack(newTrack).catch(() => {});
+  return newTrack;
 }

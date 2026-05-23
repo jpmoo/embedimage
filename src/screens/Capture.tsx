@@ -214,11 +214,39 @@ export function CaptureScreen({
     }
   }, [busy, track, url, pushLog]);
 
-  const onClose = useCallback(() => {
+  // "Back" returns to the file browser (existing flow).
+  const onBackToBrowser = useCallback(() => {
     setCapturing(false);
-    setTrack(null);
     onBack();
   }, [onBack]);
+
+  // "Close" exits the plugin entirely, back to the note canvas — the user
+  // asked for this so they can resume drawing without going via Browser.
+  const onCloseToCanvas = useCallback(() => {
+    setCapturing(false);
+    PluginManager.closePluginView().catch(() => {});
+  }, []);
+
+  // "Replace & Close": one-tap refresh + back to canvas. Falls back to
+  // Insert if there's no tracked embed yet.
+  const onReplaceAndClose = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    pushLog(track ? 'replace+close: baking…' : 'insert+close: baking…');
+    try {
+      const fullPath = await downloadAndBake(`${url}/frame`, IDENTITY_ADJUSTMENTS, 0, 8000);
+      if (track) {
+        await replaceInPlace(track, fullPath);
+      } else {
+        await insertAndTrack(fullPath);
+      }
+      setCapturing(false);
+      await PluginManager.closePluginView().catch(() => {});
+    } catch (e: any) {
+      pushLog(`failed: ${e?.message ?? e}`);
+      setBusy(false);
+    }
+  }, [busy, track, url, pushLog]);
 
   const sourceUri = framePath ? 'file://' + framePath : null;
   const ageSec = lastFrameTs ? Math.round((Date.now() - lastFrameTs) / 1000) : null;
@@ -226,7 +254,7 @@ export function CaptureScreen({
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Pressable style={styles.btn} onPress={onClose} disabled={busy}>
+        <Pressable style={styles.btn} onPress={onBackToBrowser} disabled={busy}>
           <Text style={styles.btnTxt}>Back</Text>
         </Pressable>
         <Text style={styles.title}>Live Capture</Text>
@@ -294,7 +322,7 @@ export function CaptureScreen({
       </View>
 
       <View style={styles.actionRow}>
-        <Pressable style={styles.actionBtn} onPress={onClose} disabled={busy}>
+        <Pressable style={styles.actionBtn} onPress={onCloseToCanvas} disabled={busy}>
           <Text style={styles.btnTxt}>Close</Text>
         </Pressable>
         <Pressable
@@ -310,6 +338,15 @@ export function CaptureScreen({
           disabled={busy || !track || !framePath}
         >
           <Text style={[styles.btnTxt, track && styles.btnTxtPrimary]}>Replace</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.actionBtn, styles.actionBtnPrimary]}
+          onPress={onReplaceAndClose}
+          disabled={busy || !framePath}
+        >
+          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>
+            {track ? 'Replace & Close' : 'Insert & Close'}
+          </Text>
         </Pressable>
       </View>
 

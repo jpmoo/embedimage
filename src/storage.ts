@@ -1,7 +1,8 @@
 import { ImageProcessor } from './imageProcessor';
-import { DEFAULT_STREAM_CONFIG, StreamConfig } from './types';
+import { DEFAULT_STREAM_CONFIG, EmbedTrack, StreamConfig } from './types';
 
 const STREAM_CONFIG_KEY = 'streamConfig';
+const EMBED_TRACK_KEY = 'embedTrack';
 
 export async function loadStreamConfig(): Promise<StreamConfig> {
   if (!ImageProcessor?.getConfigValue) return DEFAULT_STREAM_CONFIG;
@@ -29,4 +30,22 @@ export function baseUrl(cfg: StreamConfig): string {
   const host = cfg.host.trim();
   if (!host) return '';
   return `http://${host}:${cfg.port}`;
+}
+
+// Persisted across JS-runtime tear-downs so the "Refresh Embed" sidebar
+// button can find the last-inserted picture element on a fresh launch.
+export async function saveEmbedTrack(track: EmbedTrack | null): Promise<void> {
+  if (!ImageProcessor?.setConfigValue) return;
+  await ImageProcessor.setConfigValue(EMBED_TRACK_KEY, track ? JSON.stringify(track) : null);
+}
+
+export async function loadEmbedTrack(): Promise<EmbedTrack | null> {
+  if (!ImageProcessor?.getConfigValue) return null;
+  try {
+    const raw = await ImageProcessor.getConfigValue(EMBED_TRACK_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as EmbedTrack;
+  } catch {
+    return null;
+  }
 }

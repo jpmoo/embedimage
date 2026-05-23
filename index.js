@@ -7,19 +7,32 @@ AppRegistry.registerComponent(appName, () => App);
 
 PluginManager.init();
 
-const BUTTON_ID = 1;
+// Button IDs. App.tsx reads the last pressed id off PluginManager and
+// switches to the "refresh" headless flow if it sees BUTTON_REFRESH.
+export const BUTTON_MAIN = 1;
+export const BUTTON_REFRESH = 2;
 
-// type=1: sidebar button (plugins area). showType=1: tap opens the plugin view (App.tsx).
+const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
+
+// type=1: sidebar button. showType=1: tap opens the plugin view (App.tsx).
+// Both buttons go through the same view; App.tsx routes based on the
+// pressed button id.
 PluginManager.registerButton(1, ['NOTE'], {
-  id: BUTTON_ID,
+  id: BUTTON_MAIN,
   name: 'Embed Image',
-  icon: Image.resolveAssetSource(require('./assets/icon.png')).uri,
+  icon: ICON,
+  showType: 1,
+});
+
+PluginManager.registerButton(1, ['NOTE'], {
+  id: BUTTON_REFRESH,
+  name: 'Refresh Embed',
+  icon: ICON,
   showType: 1,
 });
 
 PluginManager.registerButtonListener({
-  onButtonPress: (msg) => {
-    if (!msg || msg.id !== BUTTON_ID) return;
-    // showType=1 opens the view automatically; nothing else to do here.
+  onButtonPress: (_msg) => {
+    // Routing happens in App.tsx via PluginManager.lastButtonEventMsg.
   },
 });

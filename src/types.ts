@@ -1,7 +1,7 @@
 export type SortKey = 'date_desc' | 'date_asc' | 'name';
 export type EntryKind = 'image' | 'folder';
 export type Entry = { name: string; path: string; kind: EntryKind };
-export type Screen = 'browser' | 'preview' | 'settings' | 'capture';
+export type Screen = 'browser' | 'preview' | 'settings' | 'capture' | 'refresh';
 
 export type Adjustments = {
   fade: number;
