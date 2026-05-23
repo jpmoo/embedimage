@@ -16,6 +16,8 @@ import { StatusDot } from '../StatusDot';
 import { downloadAndBake, lanHttp, lanJson, lanPostFile } from '../imageProcessor';
 import { insertAndTrack, replaceInPlace } from '../embedTracker';
 import { baseUrl, saveStreamConfig } from '../storage';
+import { theme } from '../ui/theme';
+import { MenuBar, StatusBar, TitleBar, Win95Button, Win95InsetPanel } from '../ui/Win95';
 import { useConnStatus } from '../useConnStatus';
 import {
   Adjustments,
@@ -307,87 +309,84 @@ export function CaptureScreen({
 
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Pressable style={styles.btn} onPress={onBackToBrowser} disabled={busy}>
-          <Text style={styles.btnTxt}>Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Live Capture</Text>
+      <TitleBar title="LIVE.EXE - Mac Capture" onClose={onCloseToCanvas} />
+      <MenuBar
+        menus={[
+          {
+            label: 'Stream',
+            items: [
+              { label: capturing ? 'Pause' : 'Start', onPress: onTogglePolling },
+              { label: 'Pull once', onPress: () => fetchOnce(), disabled: !url },
+              { separator: true, label: '' },
+              { label: 'Check status', onPress: onCheckStatus, disabled: !url },
+              { label: 'Close (back to canvas)', onPress: onCloseToCanvas },
+              { label: 'Back to Browser', onPress: onBackToBrowser },
+            ],
+          },
+          {
+            label: 'Source',
+            items: [
+              { label: 'Pick screen / window / region…', onPress: onOpenSourcePicker, disabled: !url },
+            ],
+          },
+          {
+            label: 'Image',
+            items: [
+              { label: 'Remove background (still only)', onPress: onRemoveBg, disabled: !framePath || capturing },
+              { separator: true, label: '' },
+              { label: 'Settings…', onPress: onOpenSettings },
+            ],
+          },
+        ]}
+      />
+
+      <View style={styles.statusStrip}>
+        <Text style={styles.statusStripTxt} numberOfLines={1}>
+          {url || '(no server set)'} · {intervalSec.toFixed(1)}s · {Math.round(resolutionMul * 100)}% ·{' '}
+          {lastFrameTs ? `frame ${ageSec}s ago` : 'no frame yet'}{track ? ' · EMBED' : ''}
+        </Text>
         <StatusDot status={connStatus} />
-        <Pressable style={styles.btn} onPress={onOpenSourcePicker} disabled={busy || !url}>
-          <Text style={styles.btnTxt}>Source</Text>
-        </Pressable>
-        <Pressable style={styles.btn} onPress={onOpenSettings} disabled={busy}>
-          <Text style={styles.btnTxt}>Settings</Text>
-        </Pressable>
       </View>
 
-      <Text style={styles.status} numberOfLines={1}>
-        {url || '(no server set)'} · interval {intervalSec.toFixed(1)}s ·{' '}
-        {lastFrameTs ? `last frame ${ageSec}s ago` : 'no frame yet'}
-        {track ? ' · embedded' : ''}
-      </Text>
-
-      <View style={styles.previewArea}>
+      <Win95InsetPanel style={styles.previewArea}>
         {sourceUri ? (
           <Image source={{ uri: sourceUri }} style={styles.previewImg} resizeMode="contain" />
         ) : (
           <Text style={styles.placeholder}>
-            {capturing ? 'waiting for first frame…' : 'tap Start to begin streaming'}
+            {capturing ? 'waiting for first frame…' : 'STREAM → Start to begin'}
           </Text>
         )}
+      </Win95InsetPanel>
+
+      <View style={styles.controlBar}>
+        <Win95Button small onPress={onTogglePolling} disabled={busy} active={capturing}>
+          {capturing ? 'Pause' : 'Start'}
+        </Win95Button>
+        <Win95Button small onPress={() => fetchOnce()} disabled={busy || !url}>Pull</Win95Button>
+        <Win95Button small onPress={onRemoveBg} disabled={busy || !framePath || capturing}>Rm BG</Win95Button>
+        <View style={{ flex: 1 }} />
+        <Text style={styles.dim}>Interval</Text>
+        <Win95Button small onPress={() => changeInterval(-INTERVAL_STEP)} disabled={busy}>−</Win95Button>
+        <Text style={styles.fieldVal}>{intervalSec.toFixed(1)}s</Text>
+        <Win95Button small onPress={() => changeInterval(+INTERVAL_STEP)} disabled={busy}>+</Win95Button>
       </View>
 
       <View style={styles.controlBar}>
-        <Pressable
-          style={[styles.btn, capturing && styles.btnActive]}
-          onPress={onTogglePolling}
-          disabled={busy}
-        >
-          <Text style={[styles.btnTxt, capturing && styles.btnTxtPrimary]}>
-            {capturing ? 'Pause' : 'Start'}
-          </Text>
-        </Pressable>
-        <Pressable style={styles.btn} onPress={() => fetchOnce()} disabled={busy || !url}>
-          <Text style={styles.btnTxt}>Pull once</Text>
-        </Pressable>
-        <Pressable
-          style={styles.btn}
-          onPress={onRemoveBg}
-          disabled={busy || !framePath || capturing}
-        >
-          <Text style={[styles.btnTxt, capturing && styles.btnTxtMuted]}>Remove BG</Text>
-        </Pressable>
+        <Win95Button small onPress={onOpenSourcePicker} disabled={busy || !url}>Source…</Win95Button>
+        <Win95Button small onPress={onCheckStatus} disabled={busy || !url}>Status</Win95Button>
         <View style={{ flex: 1 }} />
-        <Pressable style={styles.btn} onPress={() => changeInterval(-INTERVAL_STEP)} disabled={busy}>
-          <Text style={styles.btnTxt}>−</Text>
-        </Pressable>
-        <Text style={styles.intervalLabel}>{intervalSec.toFixed(1)}s</Text>
-        <Pressable style={styles.btn} onPress={() => changeInterval(+INTERVAL_STEP)} disabled={busy}>
-          <Text style={styles.btnTxt}>+</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.controlBar}>
-        <Text style={styles.intervalLabel}>Res</Text>
-        <Pressable style={styles.btn} onPress={() => changeResolutionMul(-0.1)} disabled={busy}>
-          <Text style={styles.btnTxt}>−</Text>
-        </Pressable>
-        <Text style={styles.intervalLabel}>{Math.round(resolutionMul * 100)}%</Text>
-        <Pressable style={styles.btn} onPress={() => changeResolutionMul(+0.1)} disabled={busy}>
-          <Text style={styles.btnTxt}>+</Text>
-        </Pressable>
-        <View style={{ flex: 1 }} />
-        <Pressable style={styles.btn} onPress={onCheckStatus} disabled={busy || !url}>
-          <Text style={styles.btnTxt}>Status</Text>
-        </Pressable>
+        <Text style={styles.dim}>Res</Text>
+        <Win95Button small onPress={() => changeResolutionMul(-0.1)} disabled={busy}>−</Win95Button>
+        <Text style={styles.fieldVal}>{Math.round(resolutionMul * 100)}%</Text>
+        <Win95Button small onPress={() => changeResolutionMul(+0.1)} disabled={busy}>+</Win95Button>
       </View>
 
       <AdjustmentPanel values={adjustments} onChange={setAdjustments} disabled={busy} />
 
-      <View style={styles.logBox}>
+      <Win95InsetPanel style={styles.logBox}>
         <ScrollView contentContainerStyle={styles.logScroll}>
           {logs.length === 0 ? (
-            <Text style={styles.logEmpty}>logs will appear here…</Text>
+            <Text style={styles.logEmpty}>C:\&gt;_ logs will appear here…</Text>
           ) : (
             logs.map((e, i) => (
               <Text key={`${e.ts}-${i}`} style={styles.logLine} numberOfLines={2}>
@@ -396,40 +395,21 @@ export function CaptureScreen({
             ))
           )}
         </ScrollView>
-      </View>
+      </Win95InsetPanel>
 
       <View style={styles.actionRow}>
-        <Pressable style={styles.actionBtn} onPress={onCloseToCanvas} disabled={busy}>
-          <Text style={styles.btnTxt}>Close</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.actionBtnPrimary]}
-          onPress={onInsert}
-          disabled={busy || !framePath}
-        >
-          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>Insert</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, track ? styles.actionBtnPrimary : styles.actionBtnDisabled]}
-          onPress={onReplace}
-          disabled={busy || !track || !framePath}
-        >
-          <Text style={[styles.btnTxt, track && styles.btnTxtPrimary]}>Replace</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.actionBtnPrimary]}
-          onPress={onReplaceAndClose}
-          disabled={busy || !framePath}
-        >
-          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>
-            {track ? 'Replace & Close' : 'Insert & Close'}
-          </Text>
-        </Pressable>
+        <Win95Button onPress={onCloseToCanvas} disabled={busy}>Close</Win95Button>
+        <View style={{ flex: 1 }} />
+        <Win95Button onPress={onInsert} disabled={busy || !framePath}>Insert</Win95Button>
+        <Win95Button onPress={onReplace} disabled={busy || !track || !framePath}>Replace</Win95Button>
+        <Win95Button onPress={onReplaceAndClose} disabled={busy || !framePath} primary>
+          {track ? 'Replace & Close' : 'Insert & Close'}
+        </Win95Button>
       </View>
 
       {busy ? (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={theme.text} />
         </View>
       ) : null}
     </SafeAreaView>
@@ -437,59 +417,45 @@ export function CaptureScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#000',
+  root: { flex: 1, backgroundColor: theme.bg },
+  statusStrip: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: theme.bg,
+    paddingHorizontal: 8, paddingVertical: 2,
   },
-  title: { flex: 1, fontSize: 22, fontWeight: '600', color: '#000' },
-  status: {
-    fontSize: 12, color: '#444',
-    paddingHorizontal: 16, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#ddd',
-  },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
-  btnActive: { backgroundColor: '#000' },
-  btnTxt: { fontSize: 14, color: '#000' },
-  btnTxtPrimary: { color: '#fff' },
-  btnTxtMuted: { color: '#999' },
+  statusStripTxt: { flex: 1, fontFamily: 'VT323', fontSize: 14, color: theme.text },
   previewArea: {
-    flex: 1, backgroundColor: '#fff', margin: 12,
-    borderWidth: 1, borderColor: '#000',
+    flex: 1, margin: 6,
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
   },
   previewImg: { width: '100%', height: '100%' },
-  placeholder: { fontSize: 14, color: '#666' },
+  placeholder: { fontFamily: 'VT323', fontSize: 18, color: theme.textMuted, padding: 16 },
   controlBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderTopWidth: 1, borderTopColor: '#ccc',
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 6, paddingVertical: 3,
+    backgroundColor: theme.bg,
   },
-  intervalLabel: { fontSize: 14, color: '#000', minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  dim: { fontFamily: 'VT323', fontSize: 14, color: theme.text, marginHorizontal: 4 },
+  fieldVal: {
+    fontFamily: 'VT323', fontSize: 14, color: theme.text,
+    minWidth: 44, textAlign: 'center',
+  },
   logBox: {
-    height: 110, marginHorizontal: 12, marginBottom: 8,
-    borderWidth: 1, borderColor: '#bbb', backgroundColor: '#fafafa',
+    height: 100, marginHorizontal: 6, marginVertical: 4,
+    paddingHorizontal: 4,
   },
-  logScroll: { padding: 6 },
-  logEmpty: { fontSize: 11, color: '#888' },
-  logLine: { fontSize: 11, color: '#222', fontFamily: 'monospace' },
+  logScroll: { paddingVertical: 4 },
+  logEmpty: { fontFamily: 'VT323', fontSize: 14, color: theme.shadow },
+  logLine: { fontFamily: 'VT323', fontSize: 14, color: theme.text },
   actionRow: {
-    flexDirection: 'row', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderTopWidth: 1, borderTopColor: '#ccc',
+    flexDirection: 'row', gap: 6,
+    paddingHorizontal: 6, paddingVertical: 6,
+    backgroundColor: theme.bg, alignItems: 'center',
   },
-  actionBtn: {
-    flex: 1, paddingVertical: 12,
-    borderWidth: 1, borderColor: '#000',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#000' },
-  actionBtnDisabled: { borderColor: '#ccc' },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(192,192,192,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

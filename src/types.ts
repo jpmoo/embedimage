@@ -1,13 +1,31 @@
 export type SortKey = 'date_desc' | 'date_asc' | 'name';
 export type EntryKind = 'image' | 'folder';
 export type Entry = { name: string; path: string; kind: EntryKind };
-export type Screen = 'browser' | 'preview' | 'settings' | 'capture' | 'refresh' | 'sourcepicker';
+export type Screen =
+  | 'browser'
+  | 'preview'
+  | 'settings'
+  | 'capture'
+  | 'refresh'
+  | 'sourcepicker'
+  | 'dropinbox'
+  | 'sendlasso';
+
+export type DitherMode = 'none' | 'fs1' | 'fs4' | 'atkinson';
+
+export const DITHER_LABELS: Record<DitherMode, string> = {
+  none: 'Off',
+  fs1: '1-bit',
+  fs4: '4-gray',
+  atkinson: 'Atkinson',
+};
 
 export type Adjustments = {
   fade: number;
   brightness: number;
   contrast: number;
   gamma: number;
+  dither: DitherMode;
 };
 
 export const DEFAULT_ADJUSTMENTS: Adjustments = {
@@ -15,7 +33,10 @@ export const DEFAULT_ADJUSTMENTS: Adjustments = {
   brightness: 0,
   contrast: 0,
   gamma: 1.0,
+  dither: 'none',
 };
+
+export type Preset = Adjustments & { name: string };
 
 export type StreamConfig = {
   host: string;

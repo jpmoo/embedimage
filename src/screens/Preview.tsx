@@ -14,6 +14,8 @@ import { AdjustmentPanel } from '../AdjustmentPanel';
 import { StatusDot } from '../StatusDot';
 import { adjustmentsAreDefault, bakeFile, lanPostFile } from '../imageProcessor';
 import { baseUrl, loadStreamConfig } from '../storage';
+import { theme } from '../ui/theme';
+import { StatusBar, TitleBar, Win95Button, Win95InsetPanel } from '../ui/Win95';
 import { useConnStatus } from '../useConnStatus';
 import { Adjustments, DEFAULT_ADJUSTMENTS, DEFAULT_STREAM_CONFIG, Entry, StreamConfig } from '../types';
 
@@ -131,46 +133,31 @@ export function PreviewScreen({
 
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Pressable style={styles.btn} onPress={onBack} disabled={busy}>
-          <Text style={styles.btnTxt}>Back</Text>
-        </Pressable>
-        <Text style={styles.title} numberOfLines={1}>{entry.name}</Text>
-        {previewing ? <ActivityIndicator size="small" color="#000" /> : null}
+      <TitleBar title={`PREVIEW.EXE — ${entry.name}`} onClose={onBack} />
+      <View style={styles.statusStrip}>
+        <Text style={styles.statusTxt} numberOfLines={1}>{status}</Text>
+        {previewing ? <ActivityIndicator size="small" color={theme.text} /> : null}
         <StatusDot status={connStatus} />
       </View>
 
-      <Text style={styles.status} numberOfLines={1}>{status}</Text>
-
-      <View style={styles.previewArea}>
+      <Win95InsetPanel style={styles.previewArea}>
         <Image source={{ uri: sourceUri }} style={styles.previewImg} resizeMode="contain" />
-      </View>
+      </Win95InsetPanel>
 
       <AdjustmentPanel values={adjustments} onChange={setAdjustments} disabled={busy} />
 
       <View style={styles.actionRow}>
-        <Pressable style={styles.actionBtn} onPress={onBack} disabled={busy}>
-          <Text style={styles.btnTxt}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          style={styles.actionBtn}
-          onPress={onRemoveBg}
-          disabled={busy || !baseUrl(streamCfg)}
-        >
-          <Text style={styles.btnTxt}>Remove BG</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.actionBtnPrimary]}
-          onPress={onInsert}
-          disabled={busy}
-        >
-          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>Insert</Text>
-        </Pressable>
+        <Win95Button onPress={onBack} disabled={busy}>Cancel</Win95Button>
+        <View style={{ flex: 1 }} />
+        <Win95Button onPress={onRemoveBg} disabled={busy || !baseUrl(streamCfg)}>Remove BG</Win95Button>
+        <Win95Button onPress={onInsert} disabled={busy} primary>Insert</Win95Button>
       </View>
+
+      <StatusBar>{baseUrl(streamCfg) || 'no Mac server set'}</StatusBar>
 
       {busy ? (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={theme.text} />
         </View>
       ) : null}
     </SafeAreaView>
@@ -178,42 +165,27 @@ export function PreviewScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#000',
+  root: { flex: 1, backgroundColor: theme.bg },
+  statusStrip: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 8, paddingVertical: 2,
+    backgroundColor: theme.bg,
   },
-  title: { flex: 1, fontSize: 22, fontWeight: '600', color: '#000' },
-  status: {
-    fontSize: 12, color: '#444',
-    paddingHorizontal: 16, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#ddd',
-  },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
-  btnTxt: { fontSize: 14, color: '#000' },
-  btnTxtPrimary: { color: '#fff' },
+  statusTxt: { flex: 1, fontFamily: 'VT323', fontSize: 14, color: theme.text },
   previewArea: {
-    flex: 1, backgroundColor: '#fff', margin: 12,
-    borderWidth: 1, borderColor: '#000',
+    flex: 1, margin: 6,
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
   },
   previewImg: { width: '100%', height: '100%' },
   actionRow: {
-    flexDirection: 'row', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderTopWidth: 1, borderTopColor: '#ccc',
+    flexDirection: 'row', gap: 6,
+    paddingHorizontal: 6, paddingVertical: 6,
+    alignItems: 'center', backgroundColor: theme.bg,
   },
-  actionBtn: {
-    flex: 1, paddingVertical: 12,
-    borderWidth: 1, borderColor: '#000',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#000' },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(192,192,192,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

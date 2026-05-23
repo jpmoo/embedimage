@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   GestureResponderEvent,
   Image,
@@ -11,13 +13,9 @@ import {
   View,
 } from 'react-native';
 import { lanHttp, lanJson } from '../imageProcessor';
+import { theme } from '../ui/theme';
+import { StatusBar, TitleBar, Win95Button, Win95Frame, Win95InsetPanel } from '../ui/Win95';
 import { MacWindow, Region } from '../types';
-
-// Lets the user pick a capture source (full screen / window / region)
-// directly from the Manta. For "region" we pull a downscaled snapshot of
-// the Mac primary monitor and let the user drag a rectangle on the
-// touchscreen; coordinates are mapped back to Mac pixels via the
-// X-Mon-* / X-Scale headers returned by /preview-shot.
 
 type Mode = 'menu' | 'window' | 'region';
 
@@ -77,13 +75,12 @@ export function SourcePicker({
   const openRegion = useCallback(async () => {
     setMode('region');
     setBusy(true);
-    setStatus('grabbing screenshot from Mac…');
+    setStatus('TUNING… grabbing screen from Mac');
     try {
       const { downloadAndBake } = await import('../imageProcessor');
       const { DEFAULT_ADJUSTMENTS } = await import('../types');
-      const previewMax = 700;
       const path = await downloadAndBake(
-        `${baseUrl}/preview-shot?max=${previewMax}`,
+        `${baseUrl}/preview-shot?max=700`,
         DEFAULT_ADJUSTMENTS,
         0,
         8000,
@@ -92,8 +89,7 @@ export function SourcePicker({
       const mon = st?.monitor ?? { left: 0, top: 0, width: 0, height: 0 };
       setShotUri('file://' + path);
       Image.getSize('file://' + path, (pw, ph) => {
-        const monLong = Math.max(mon.width || 0, mon.height || 0) || Math.max(pw, ph);
-        const scale = monLong > 0 ? pw / (mon.width || pw) : 1.0;
+        const scale = mon.width ? pw / mon.width : 1.0;
         setShotInfo({
           monLeft: mon.left || 0,
           monTop: mon.top || 0,
@@ -103,10 +99,10 @@ export function SourcePicker({
           previewW: pw,
           previewH: ph,
         });
-        setStatus(`drag a region · mac ${mon.width}×${mon.height}`);
-      }, () => setStatus('failed to read screenshot'));
+        setStatus(`SIGNAL OK — ${mon.width}×${mon.height}`);
+      }, () => setStatus('NO SIGNAL'));
     } catch (e: any) {
-      setStatus(`failed: ${e?.message ?? e}`);
+      setStatus(`FAULT: ${e?.message ?? e}`);
     } finally {
       setBusy(false);
     }
@@ -126,9 +122,7 @@ export function SourcePicker({
     const { locationX, locationY } = e.nativeEvent;
     setDragEnd({ x: locationX, y: locationY });
   }, []);
-  const onTouchEnd = useCallback(() => {
-    // no-op; selection committed by "Use selection" button.
-  }, []);
+  const onTouchEnd = useCallback(() => {}, []);
 
   const selectionRect = useMemo(() => {
     if (!dragStart || !dragEnd) return null;
@@ -152,28 +146,25 @@ export function SourcePicker({
     postSource({ source: 'region', region }, `Region ${region.w}×${region.h}`);
   }, [selectionRect, shotInfo, postSource]);
 
+  // ---- Menu mode (Win95 chrome) ----
   if (mode === 'menu') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.header}>
-          <Pressable style={styles.btn} onPress={onClose}>
-            <Text style={styles.btnTxt}>Back</Text>
-          </Pressable>
-          <Text style={styles.title}>Mac source</Text>
-        </View>
+        <TitleBar title="SOURCE.EXE" onClose={onClose} />
         <View style={styles.body}>
-          <Pressable style={styles.bigBtn} onPress={onPickScreen} disabled={busy}>
-            <Text style={styles.bigBtnTxt}>Full screen</Text>
-          </Pressable>
-          <Pressable style={styles.bigBtn} onPress={openWindowList} disabled={busy}>
-            <Text style={styles.bigBtnTxt}>Window…</Text>
-          </Pressable>
-          <Pressable style={styles.bigBtn} onPress={openRegion} disabled={busy}>
-            <Text style={styles.bigBtnTxt}>Region (drag on preview)</Text>
-          </Pressable>
-          {!!status && <Text style={styles.status}>{status}</Text>}
+          <Win95Frame style={styles.menuCard}>
+            <Text style={styles.menuTitle}>Capture Source</Text>
+            <Text style={styles.menuHint}>Choose what the Mac sends.</Text>
+            <View style={{ height: 8 }} />
+            <Win95Button onPress={onPickScreen} disabled={busy}>Full Screen</Win95Button>
+            <View style={{ height: 6 }} />
+            <Win95Button onPress={openWindowList} disabled={busy}>Window…</Win95Button>
+            <View style={{ height: 6 }} />
+            <Win95Button onPress={openRegion} disabled={busy} primary>Region (drag on CRT)</Win95Button>
+          </Win95Frame>
         </View>
-        {busy ? <View style={styles.overlay}><ActivityIndicator size="large" color="#000" /></View> : null}
+        <StatusBar>{status || 'Ready.'}</StatusBar>
+        {busy ? <Overlay /> : null}
       </SafeAreaView>
     );
   }
@@ -181,132 +172,247 @@ export function SourcePicker({
   if (mode === 'window') {
     return (
       <SafeAreaView style={styles.root}>
-        <View style={styles.header}>
-          <Pressable style={styles.btn} onPress={() => setMode('menu')}>
-            <Text style={styles.btnTxt}>Back</Text>
-          </Pressable>
-          <Text style={styles.title}>Pick window</Text>
-        </View>
-        <Text style={styles.status}>{status}</Text>
-        <FlatList
-          data={windows}
-          keyExtractor={(w) => String(w.id)}
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.windowRow}
-              onPress={() => postSource({ source: 'window', window_id: item.id }, `${item.owner}`)}
-              disabled={busy}
-            >
-              <Text style={styles.windowOwner}>{item.owner || '(unknown)'}</Text>
-              <Text style={styles.windowTitle} numberOfLines={1}>
-                {item.title || '(no title)'} · {item.w}×{item.h}
-              </Text>
-            </Pressable>
-          )}
-        />
-        {busy ? <View style={styles.overlay}><ActivityIndicator size="large" color="#000" /></View> : null}
+        <TitleBar title="SOURCE.EXE — Pick Window" onClose={() => setMode('menu')} />
+        <Win95InsetPanel style={styles.windowList}>
+          <FlatList
+            data={windows}
+            keyExtractor={(w) => String(w.id)}
+            renderItem={({ item }) => (
+              <Pressable
+                style={({ pressed }) => [styles.windowRow, pressed && styles.windowRowPressed]}
+                onPress={() => postSource({ source: 'window', window_id: item.id }, `${item.owner}`)}
+                disabled={busy}
+              >
+                <Text style={styles.windowOwner}>{item.owner || '(unknown)'}</Text>
+                <Text style={styles.windowTitle} numberOfLines={1}>
+                  {item.title || '(no title)'} · {item.w}×{item.h}
+                </Text>
+              </Pressable>
+            )}
+          />
+        </Win95InsetPanel>
+        <StatusBar>{status}</StatusBar>
+        {busy ? <Overlay /> : null}
       </SafeAreaView>
     );
   }
 
-  // region mode
+  // ---- Region mode: CRT screensaver aesthetic ----
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Pressable style={styles.btn} onPress={() => setMode('menu')}>
-          <Text style={styles.btnTxt}>Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Drag region</Text>
-      </View>
-      <Text style={styles.status}>{status}</Text>
-      <View style={styles.previewWrap}>
-        {shotUri && previewLayout ? (
-          <View
-            style={[styles.previewBox, previewLayout]}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={onTouchStart}
-            onResponderMove={onTouchMove}
-            onResponderRelease={onTouchEnd}
-          >
-            <Image source={{ uri: shotUri }} style={previewLayout} />
-            {selectionRect ? (
-              <View
-                style={[
-                  styles.selRect,
-                  {
-                    left: selectionRect.x,
-                    top: selectionRect.y,
-                    width: selectionRect.w,
-                    height: selectionRect.h,
-                  },
-                ]}
+      <TitleBar title="SOURCE.EXE — Region Capture" onClose={() => setMode('menu')} />
+      <View style={styles.crtWrap}>
+        <CrtBezel>
+          {shotUri && previewLayout ? (
+            <View
+              style={[styles.crtScreen, previewLayout]}
+              onStartShouldSetResponder={() => true}
+              onMoveShouldSetResponder={() => true}
+              onResponderGrant={onTouchStart}
+              onResponderMove={onTouchMove}
+              onResponderRelease={onTouchEnd}
+            >
+              <Image
+                source={{ uri: shotUri }}
+                style={[previewLayout, styles.crtImage]}
+                resizeMode="cover"
               />
-            ) : null}
-          </View>
-        ) : (
-          <ActivityIndicator size="large" color="#000" />
-        )}
+              <Scanlines />
+              <CrtPhosphorGlow />
+              {selectionRect ? (
+                <View
+                  style={[
+                    styles.selRect,
+                    {
+                      left: selectionRect.x,
+                      top: selectionRect.y,
+                      width: selectionRect.w,
+                      height: selectionRect.h,
+                    },
+                  ]}
+                >
+                  <Text style={styles.selRectLabel}>
+                    {Math.round(selectionRect.w / (shotInfo?.scale ?? 1))}×
+                    {Math.round(selectionRect.h / (shotInfo?.scale ?? 1))}
+                  </Text>
+                </View>
+              ) : null}
+              <CrtCornerTag>SOURCE-1</CrtCornerTag>
+              <CrtBottomTag>{status}</CrtBottomTag>
+            </View>
+          ) : (
+            <View style={styles.crtBlank}>
+              <ActivityIndicator size="large" color="#5fff5f" />
+              <Text style={styles.crtBlankTxt}>NO SIGNAL</Text>
+              <Text style={styles.crtBlankSub}>{status}</Text>
+            </View>
+          )}
+        </CrtBezel>
       </View>
-      <View style={styles.row}>
-        <Pressable style={styles.btn} onPress={() => { setDragStart(null); setDragEnd(null); }}>
-          <Text style={styles.btnTxt}>Clear</Text>
-        </Pressable>
+      <View style={styles.controlRow}>
+        <Win95Button small onPress={() => { setDragStart(null); setDragEnd(null); }}>Clear</Win95Button>
         <View style={{ flex: 1 }} />
-        <Pressable
-          style={[styles.btn, selectionRect && styles.btnActive]}
-          onPress={onUseRegion}
-          disabled={busy || !selectionRect}
-        >
-          <Text style={[styles.btnTxt, selectionRect && styles.btnTxtPrimary]}>Use selection</Text>
-        </Pressable>
+        <Win95Button onPress={onUseRegion} disabled={busy || !selectionRect} primary>
+          Use Selection
+        </Win95Button>
       </View>
-      {busy ? <View style={styles.overlay}><ActivityIndicator size="large" color="#000" /></View> : null}
+      <StatusBar>{status}</StatusBar>
+      {busy ? <Overlay /> : null}
     </SafeAreaView>
   );
 }
 
+// ---- CRT cosmetic components ----
+
+function CrtBezel({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <View style={styles.crtOuter}>
+      <View style={styles.crtFrame}>
+        <View style={styles.crtInner}>{children}</View>
+      </View>
+      <View style={styles.crtStandRow}>
+        <View style={styles.crtStand} />
+        <View style={styles.crtKnob} />
+        <View style={styles.crtKnob} />
+        <View style={styles.crtLed} />
+      </View>
+    </View>
+  );
+}
+
+function Scanlines(): React.JSX.Element {
+  // Horizontal scanline overlay — done with a column of thin transparent
+  // strips. Looks like an old CRT under e-ink rendering.
+  const rows = 80;
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <View key={i} style={[styles.scanline, { top: `${(i / rows) * 100}%` }]} />
+      ))}
+    </View>
+  );
+}
+
+function CrtPhosphorGlow(): React.JSX.Element {
+  const flicker = React.useRef(new Animated.Value(0.85)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(flicker, { toValue: 1.0, duration: 200, easing: Easing.linear, useNativeDriver: false }),
+        Animated.timing(flicker, { toValue: 0.85, duration: 240, easing: Easing.linear, useNativeDriver: false }),
+        Animated.timing(flicker, { toValue: 0.95, duration: 90, easing: Easing.linear, useNativeDriver: false }),
+      ]),
+    ).start();
+  }, [flicker]);
+  return <Animated.View pointerEvents="none" style={[styles.glow, { opacity: flicker.interpolate({ inputRange: [0.85, 1], outputRange: [0.1, 0.18] }) }]} />;
+}
+
+function CrtCornerTag({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <Text style={styles.crtCornerTag}>{children}</Text>;
+}
+
+function CrtBottomTag({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <Text style={styles.crtBottomTag}>{children}</Text>;
+}
+
+function Overlay(): React.JSX.Element {
+  return <View style={styles.overlay}><ActivityIndicator size="large" color={theme.text} /></View>;
+}
+
+const PHOSPHOR = '#5fff7f';
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#000',
+  root: { flex: 1, backgroundColor: theme.bg },
+  body: { flex: 1, padding: 16, alignItems: 'center' },
+  menuCard: { padding: 16, minWidth: 280 },
+  menuTitle: { fontFamily: 'VT323', fontSize: 22, color: theme.text },
+  menuHint: { fontFamily: 'VT323', fontSize: 14, color: theme.textMuted },
+  windowList: { flex: 1, margin: 6 },
+  windowRow: { paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: theme.shadow },
+  windowRowPressed: { backgroundColor: theme.selBg },
+  windowOwner: { fontFamily: 'VT323', fontSize: 16, color: theme.text },
+  windowTitle: { fontFamily: 'VT323', fontSize: 14, color: theme.textMuted, marginTop: 2 },
+
+  // ---- CRT styles ----
+  crtWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 8, backgroundColor: theme.bg },
+  crtOuter: { alignItems: 'center' },
+  crtFrame: {
+    padding: 18,
+    backgroundColor: '#dcdcc8', // beige '90s monitor plastic
+    borderTopLeftRadius: 14, borderTopRightRadius: 14,
+    borderBottomLeftRadius: 6, borderBottomRightRadius: 6,
+    borderTopWidth: 2, borderLeftWidth: 2,
+    borderRightWidth: 2, borderBottomWidth: 2,
+    borderTopColor: '#fff', borderLeftColor: '#fff',
+    borderRightColor: '#808070', borderBottomColor: '#808070',
   },
-  title: { flex: 1, fontSize: 22, fontWeight: '600', color: '#000' },
-  status: { fontSize: 12, color: '#444', paddingHorizontal: 16, paddingVertical: 6 },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
-  btnActive: { backgroundColor: '#000' },
-  btnTxt: { fontSize: 14, color: '#000' },
-  btnTxtPrimary: { color: '#fff' },
-  body: { padding: 16, gap: 12 },
-  bigBtn: {
-    paddingVertical: 18, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: '#000', alignItems: 'center',
+  crtInner: {
+    padding: 6,
+    backgroundColor: '#080808',
+    borderRadius: 8,
+    borderWidth: 2, borderColor: '#202020',
   },
-  bigBtnTxt: { fontSize: 16, color: '#000' },
-  windowRow: {
-    paddingVertical: 12, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: '#eee',
+  crtScreen: { backgroundColor: '#000', borderRadius: 4, overflow: 'hidden' },
+  crtImage: { opacity: 0.85 },
+  scanline: {
+    position: 'absolute', left: 0, right: 0, height: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  windowOwner: { fontSize: 15, color: '#000', fontWeight: '500' },
-  windowTitle: { fontSize: 12, color: '#666', marginTop: 2 },
-  previewWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12 },
-  previewBox: { borderWidth: 1, borderColor: '#000', overflow: 'hidden' },
+  glow: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: PHOSPHOR,
+  },
   selRect: {
     position: 'absolute',
-    borderWidth: 2, borderColor: '#000',
-    backgroundColor: 'rgba(0,0,0,0.1)',
+    borderWidth: 2, borderColor: PHOSPHOR,
+    backgroundColor: 'rgba(95,255,127,0.18)',
   },
-  row: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderTopWidth: 1, borderTopColor: '#ccc',
-    alignItems: 'center',
+  selRectLabel: {
+    position: 'absolute', top: 2, left: 4,
+    color: PHOSPHOR, fontFamily: 'VT323', fontSize: 14,
+  },
+  crtCornerTag: {
+    position: 'absolute', top: 4, right: 6,
+    color: PHOSPHOR, fontFamily: 'VT323', fontSize: 14,
+  },
+  crtBottomTag: {
+    position: 'absolute', bottom: 4, left: 8, right: 8,
+    color: PHOSPHOR, fontFamily: 'VT323', fontSize: 12,
+  },
+  crtBlank: {
+    width: 320, height: 200, backgroundColor: '#000',
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  crtBlankTxt: { color: PHOSPHOR, fontFamily: 'VT323', fontSize: 22 },
+  crtBlankSub: { color: PHOSPHOR, fontFamily: 'VT323', fontSize: 14, opacity: 0.7 },
+  crtStandRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+    marginTop: -2,
+    paddingHorizontal: 20, paddingVertical: 6,
+    backgroundColor: '#dcdcc8',
+    borderBottomLeftRadius: 16, borderBottomRightRadius: 16,
+    borderTopWidth: 1, borderTopColor: '#808070',
+  },
+  crtStand: { width: 60, height: 4, backgroundColor: '#808070', borderRadius: 2 },
+  crtKnob: {
+    width: 12, height: 12, borderRadius: 6,
+    backgroundColor: '#a0a090',
+    borderTopWidth: 1, borderLeftWidth: 1,
+    borderTopColor: '#fff', borderLeftColor: '#fff',
+  },
+  crtLed: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: PHOSPHOR,
+  },
+
+  controlRow: {
+    flexDirection: 'row', gap: 6,
+    paddingHorizontal: 6, paddingVertical: 6,
+    backgroundColor: theme.bg, alignItems: 'center',
   },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    backgroundColor: 'rgba(192,192,192,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

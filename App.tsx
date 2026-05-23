@@ -3,15 +3,19 @@ import { PluginManager } from 'sn-plugin-lib';
 import { ImageProcessor } from './src/imageProcessor';
 import { BrowserScreen } from './src/screens/Browser';
 import { CaptureScreen } from './src/screens/Capture';
+import { DropInbox } from './src/screens/DropInbox';
 import { PreviewScreen } from './src/screens/Preview';
 import { RefreshScreen } from './src/screens/Refresh';
+import { SendLasso } from './src/screens/SendLasso';
 import { SettingsScreen } from './src/screens/Settings';
 import { SourcePicker } from './src/screens/SourcePicker';
 import { baseUrl, loadStreamConfig } from './src/storage';
 import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types';
 
-// Must match BUTTON_REFRESH in index.js.
+// Must match index.js.
 const BUTTON_REFRESH = 2;
+const BUTTON_DROP = 3;
+const BUTTON_LASSO_SEND = 4;
 
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('browser');
@@ -25,13 +29,11 @@ export default function App(): React.JSX.Element {
       setStreamConfig(cfg);
     })();
 
-    // Route based on which sidebar button was tapped. PluginManager replays
-    // the last button event to a freshly-registered listener, so the local
-    // subscription here will fire immediately if we were launched by the
-    // Refresh button.
     const sub = PluginManager.registerButtonListener({
       onButtonPress: (msg: any) => {
         if (msg?.id === BUTTON_REFRESH) setScreen('refresh');
+        else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
+        else if (msg?.id === BUTTON_LASSO_SEND) setScreen('sendlasso');
       },
     });
     return () => {
@@ -51,6 +53,14 @@ export default function App(): React.JSX.Element {
 
   if (screen === 'refresh') {
     return <RefreshScreen />;
+  }
+
+  if (screen === 'dropinbox') {
+    return <DropInbox onClose={goBrowser} />;
+  }
+
+  if (screen === 'sendlasso') {
+    return <SendLasso onClose={goBrowser} />;
   }
 
   if (screen === 'preview' && selectedEntry) {

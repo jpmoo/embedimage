@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { baseUrl, loadStreamConfig, saveStreamConfig } from '../storage';
 import { lanJson } from '../imageProcessor';
+import { theme } from '../ui/theme';
+import { StatusBar, TitleBar, Win95Button, Win95InsetPanel } from '../ui/Win95';
 import { DEFAULT_STREAM_CONFIG, StreamConfig } from '../types';
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -81,132 +83,110 @@ export function SettingsScreen({
 
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Pressable style={styles.btn} onPress={onBack} disabled={busy}>
-          <Text style={styles.btnTxt}>Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Settings</Text>
-      </View>
-
-      <Text style={styles.status} numberOfLines={2}>{status}</Text>
-
-      <View style={styles.body}>
-        <Text style={styles.section}>Mac Capture Server</Text>
-        <Text style={styles.hint}>
-          Set the IP shown by the Mac app, plus its port (default 9000). The plugin will fetch
-          frames from http://&lt;host&gt;:&lt;port&gt;/frame.
-        </Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Host (Mac IP)</Text>
-          <TextInput
-            style={styles.input}
-            value={host}
-            onChangeText={setHost}
-            placeholder="192.168.1.50"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="numbers-and-punctuation"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Port</Text>
-          <TextInput
-            style={styles.input}
-            value={port}
-            onChangeText={setPort}
-            placeholder="9000"
-            keyboardType="number-pad"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Frame interval (seconds)</Text>
-          <TextInput
-            style={styles.input}
-            value={intervalSec}
-            onChangeText={setIntervalSec}
-            placeholder="1.0"
-            keyboardType="decimal-pad"
-          />
-          <Text style={styles.hint}>0.2 .. 60 seconds. 1.0 = 1 fps (recommended for e-ink).</Text>
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Resolution multiplier</Text>
-          <TextInput
-            style={styles.input}
-            value={resolutionMul}
-            onChangeText={setResolutionMul}
-            placeholder="1.0"
-            keyboardType="decimal-pad"
-          />
+      <TitleBar title="SETTINGS.EXE" onClose={onBack} />
+      <ScrollView>
+        <View style={styles.body}>
+          <Text style={styles.section}>Mac Capture Server</Text>
           <Text style={styles.hint}>
-            0.1 .. 1.0. Mac downscales each frame by this factor before sending.
-            Lower = less bandwidth + faster Mac → Manta round-trip.
+            IP shown by the Mac app + its port. Plugin fetches frames from
+            http://&lt;host&gt;:&lt;port&gt;/frame.
           </Text>
-        </View>
 
-        <View style={styles.row}>
-          <Pressable style={styles.actionBtn} onPress={onTest} disabled={busy || !host}>
-            <Text style={styles.btnTxt}>Test connection</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.actionBtn, styles.actionBtnPrimary]}
-            onPress={onSave}
-            disabled={busy}
-          >
-            <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>Save</Text>
-          </Pressable>
+          <Field label="Host (Mac IP)">
+            <TextInput
+              style={styles.input}
+              value={host}
+              onChangeText={setHost}
+              placeholder="192.168.1.50"
+              placeholderTextColor={theme.shadow}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
+          </Field>
+
+          <Field label="Port">
+            <TextInput
+              style={styles.input}
+              value={port}
+              onChangeText={setPort}
+              placeholder="9000"
+              placeholderTextColor={theme.shadow}
+              keyboardType="number-pad"
+            />
+          </Field>
+
+          <Field label="Frame interval (seconds)">
+            <TextInput
+              style={styles.input}
+              value={intervalSec}
+              onChangeText={setIntervalSec}
+              placeholder="1.0"
+              placeholderTextColor={theme.shadow}
+              keyboardType="decimal-pad"
+            />
+            <Text style={styles.hint}>0.2 .. 60. 1.0 = 1 fps (good for e-ink).</Text>
+          </Field>
+
+          <Field label="Resolution multiplier">
+            <TextInput
+              style={styles.input}
+              value={resolutionMul}
+              onChangeText={setResolutionMul}
+              placeholder="1.0"
+              placeholderTextColor={theme.shadow}
+              keyboardType="decimal-pad"
+            />
+            <Text style={styles.hint}>
+              0.1 .. 1.0. Mac downscales each frame by this factor before sending.
+            </Text>
+          </Field>
+
+          <View style={styles.row}>
+            <Win95Button onPress={onTest} disabled={busy || !host}>Test connection</Win95Button>
+            <View style={{ flex: 1 }} />
+            <Win95Button onPress={onSave} disabled={busy} primary>Save</Win95Button>
+          </View>
         </View>
-      </View>
+      </ScrollView>
+
+      <StatusBar>{status}</StatusBar>
 
       {busy ? (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={theme.text} />
         </View>
       ) : null}
     </SafeAreaView>
   );
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Win95InsetPanel style={styles.inputWrap}>{children}</Win95InsetPanel>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#000',
-  },
-  title: { flex: 1, fontSize: 22, fontWeight: '600', color: '#000' },
-  status: {
-    fontSize: 12, color: '#444',
-    paddingHorizontal: 16, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#ddd',
-  },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
-  btnTxt: { fontSize: 14, color: '#000' },
-  btnTxtPrimary: { color: '#fff' },
-  body: { padding: 16, gap: 12 },
-  section: { fontSize: 16, fontWeight: '600', color: '#000', marginBottom: 4 },
-  hint: { fontSize: 12, color: '#666' },
+  root: { flex: 1, backgroundColor: theme.bg },
+  body: { padding: 12, gap: 10 },
+  section: { fontFamily: 'VT323', fontSize: 20, color: theme.text, marginBottom: 2 },
+  hint: { fontFamily: 'VT323', fontSize: 14, color: theme.textMuted },
   field: { gap: 4 },
-  label: { fontSize: 13, color: '#000' },
+  label: { fontFamily: 'VT323', fontSize: 16, color: theme.text },
+  inputWrap: { padding: 0 },
   input: {
-    borderWidth: 1, borderColor: '#000',
-    paddingHorizontal: 12, paddingVertical: 8,
-    fontSize: 14, color: '#000',
+    fontFamily: 'VT323',
+    paddingHorizontal: 8, paddingVertical: 6,
+    fontSize: 16, color: theme.text,
   },
-  row: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  actionBtn: {
-    flex: 1, paddingVertical: 12,
-    borderWidth: 1, borderColor: '#000',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#000' },
+  row: { flexDirection: 'row', gap: 8, marginTop: 8, alignItems: 'center' },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(192,192,192,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

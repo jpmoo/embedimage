@@ -12,6 +12,8 @@ import {
 import { FileUtils, PluginManager, RattaFileSelector } from 'sn-plugin-lib';
 import { StatusDot } from '../StatusDot';
 import { baseUrl, loadStreamConfig } from '../storage';
+import { theme } from '../ui/theme';
+import { MenuBar, StatusBar, TitleBar, Win95Button, Win95Frame, Win95InsetPanel } from '../ui/Win95';
 import { useConnStatus } from '../useConnStatus';
 import type { Entry, EntryKind, SortKey, StreamConfig } from '../types';
 import { DEFAULT_STREAM_CONFIG } from '../types';
@@ -210,119 +212,99 @@ export function BrowserScreen({
 
   return (
     <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Embed Image</Text>
-        <StatusDot status={connStatus} />
-        <Pressable style={styles.btn} onPress={onOpenCapture}>
-          <Text style={styles.btnTxt}>Live…</Text>
-        </Pressable>
-        <Pressable style={styles.btn} onPress={onOpenSettings}>
-          <Text style={styles.btnTxt}>Settings</Text>
-        </Pressable>
-        <Pressable
-          style={styles.btn}
-          onPress={() => {
-            onClose();
-            PluginManager.closePluginView().catch(() => {});
-          }}
-        >
-          <Text style={styles.btnTxt}>Close</Text>
-        </Pressable>
-      </View>
-
-      <Text style={styles.status} numberOfLines={1}>{status}</Text>
-
-      <View style={styles.pathBar}>
-        <Pressable style={styles.btn} onPress={navigateUp} disabled={!canGoUp}>
-          <Text style={[styles.btnTxt, !canGoUp && styles.btnTxtMuted]}>Up</Text>
-        </Pressable>
-        <Pressable style={styles.btn} onPress={goHome}>
-          <Text style={styles.btnTxt}>Home</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.btnActive]}
-          onPress={() => setCurrentDir(INTERNAL_ROOT)}
-        >
-          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>Internal</Text>
-        </Pressable>
-        <Text style={styles.pathTxt} numberOfLines={1} ellipsizeMode="head">{currentDir}</Text>
-      </View>
-
-      <View style={styles.sortBar}>
-        <Text style={styles.sortLabel}>Sort:</Text>
-        {SORT_OPTIONS.map((opt) => {
-          const active = opt.key === sort;
-          return (
-            <Pressable
-              key={opt.key}
-              onPress={() => setSort(opt.key)}
-              style={[styles.chip, active && styles.chipActive]}
-            >
-              <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{opt.label}</Text>
-            </Pressable>
-          );
-        })}
+      <TitleBar
+        title="Embed Image"
+        onClose={() => {
+          onClose();
+          PluginManager.closePluginView().catch(() => {});
+        }}
+      />
+      <MenuBar
+        menus={[
+          {
+            label: 'File',
+            items: [
+              { label: 'Open from system…', onPress: onSystemPicker },
+              { label: 'Refresh', onPress: () => load(currentDir) },
+              { separator: true, label: '' },
+              { label: 'Exit', onPress: () => { onClose(); PluginManager.closePluginView().catch(() => {}); } },
+            ],
+          },
+          {
+            label: 'View',
+            items: SORT_OPTIONS.map((opt) => ({
+              label: `Sort by ${opt.label}${opt.key === sort ? '  •' : ''}`,
+              onPress: () => setSort(opt.key),
+            })).concat([
+              { label: '', separator: true } as any,
+              { label: 'Bigger thumbnails', onPress: () => setColumns((c) => clamp(c - 1, MIN_COLUMNS, MAX_COLUMNS)) } as any,
+              { label: 'Smaller thumbnails', onPress: () => setColumns((c) => clamp(c + 1, MIN_COLUMNS, MAX_COLUMNS)) } as any,
+            ]),
+          },
+          {
+            label: 'Tools',
+            items: [
+              { label: 'Live Capture…', onPress: onOpenCapture },
+              { label: 'Settings…', onPress: onOpenSettings },
+            ],
+          },
+        ]}
+      />
+      <View style={styles.toolbar}>
+        <Win95Button small onPress={navigateUp} disabled={!canGoUp}>Up</Win95Button>
+        <Win95Button small onPress={goHome}>Home</Win95Button>
+        <Win95Button small active onPress={() => setCurrentDir(INTERNAL_ROOT)}>Internal</Win95Button>
         <View style={{ flex: 1 }} />
-        <Text style={styles.sortLabel}>Size:</Text>
-        <Pressable
-          onPress={() => setColumns((c) => clamp(c + 1, MIN_COLUMNS, MAX_COLUMNS))}
-          style={styles.btn}
-          disabled={columns >= MAX_COLUMNS}
-        >
-          <Text style={[styles.btnTxt, columns >= MAX_COLUMNS && styles.btnTxtMuted]}>−</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setColumns((c) => clamp(c - 1, MIN_COLUMNS, MAX_COLUMNS))}
-          style={styles.btn}
-          disabled={columns <= MIN_COLUMNS}
-        >
-          <Text style={[styles.btnTxt, columns <= MIN_COLUMNS && styles.btnTxtMuted]}>+</Text>
-        </Pressable>
-        <Pressable onPress={onSystemPicker} style={styles.btn}>
-          <Text style={styles.btnTxt}>Browse…</Text>
-        </Pressable>
-        <Pressable onPress={() => load(currentDir)} style={styles.btn}>
-          <Text style={styles.btnTxt}>Refresh</Text>
-        </Pressable>
+        <Win95Button small onPress={onOpenCapture}>Live…</Win95Button>
+        <StatusDot status={connStatus} />
+      </View>
+      <View style={styles.pathInsetWrap}>
+        <Win95InsetPanel style={styles.pathInset}>
+          <Text style={styles.pathTxt} numberOfLines={1} ellipsizeMode="head">{currentDir}</Text>
+        </Win95InsetPanel>
       </View>
 
-      {sorted.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.empty}>Nothing here.</Text>
-          <Text style={styles.emptySub}>{currentDir}</Text>
-          <Text style={styles.emptyHint}>
-            Tap “Browse…” for the system picker (WebDAV + SD), “Live…” to stream from a Mac.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          key={`grid-${columns}`}
-          data={sorted}
-          keyExtractor={(it) => it.path}
-          numColumns={columns}
-          contentContainerStyle={styles.grid}
-          renderItem={({ item }) => (
-            <Pressable
-              style={[styles.tile, { flexBasis: `${100 / columns}%`, maxWidth: `${100 / columns}%` }]}
-              onPress={() => onPickEntry(item)}
-              disabled={busy}
-            >
-              {item.kind === 'folder' ? (
-                <View style={styles.folderThumb}>
-                  <Text style={styles.folderIcon}>📁</Text>
-                </View>
-              ) : (
-                <Image source={{ uri: 'file://' + item.path }} style={styles.thumb} resizeMode="cover" />
-              )}
-              <Text numberOfLines={2} style={styles.tileName}>{item.name}</Text>
-            </Pressable>
-          )}
-        />
-      )}
+      <Win95InsetPanel style={styles.listInset}>
+        {sorted.length === 0 ? (
+          <View style={styles.center}>
+            <Text style={styles.empty}>Nothing here.</Text>
+            <Text style={styles.emptySub}>{currentDir}</Text>
+            <Text style={styles.emptyHint}>
+              File → Open from system… for WebDAV/SD. Tools → Live Capture… to stream from a Mac.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            key={`grid-${columns}`}
+            data={sorted}
+            keyExtractor={(it) => it.path}
+            numColumns={columns}
+            contentContainerStyle={styles.grid}
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.tile, { flexBasis: `${100 / columns}%`, maxWidth: `${100 / columns}%` }]}
+                onPress={() => onPickEntry(item)}
+                disabled={busy}
+              >
+                {item.kind === 'folder' ? (
+                  <View style={styles.folderThumb}>
+                    <Text style={styles.folderIcon}>[DIR]</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: 'file://' + item.path }} style={styles.thumb} resizeMode="cover" />
+                )}
+                <Text numberOfLines={2} style={styles.tileName}>{item.name}</Text>
+              </Pressable>
+            )}
+          />
+        )}
+      </Win95InsetPanel>
+
+      <StatusBar>{status}</StatusBar>
 
       {busy ? (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color="#000" />
         </View>
       ) : null}
     </SafeAreaView>
@@ -330,56 +312,43 @@ export function BrowserScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#000',
+  root: { flex: 1, backgroundColor: theme.bg },
+  toolbar: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 6, paddingVertical: 4,
+    backgroundColor: theme.bg,
+    borderBottomWidth: 1, borderBottomColor: theme.shadow,
   },
-  title: { flex: 1, fontSize: 22, fontWeight: '600', color: '#000' },
-  status: {
-    fontSize: 12, color: '#444',
-    paddingHorizontal: 16, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: '#ddd',
+  pathInsetWrap: { paddingHorizontal: 6, paddingVertical: 4, backgroundColor: theme.bg },
+  pathInset: { paddingHorizontal: 6, paddingVertical: 4 },
+  pathTxt: { flex: 1, fontFamily: 'VT323', fontSize: 14, color: theme.text },
+  listInset: { flex: 1, margin: 6 },
+  grid: { padding: 6 },
+  tile: { padding: 4, alignItems: 'center' },
+  thumb: {
+    width: '100%', aspectRatio: 1, backgroundColor: theme.bg,
+    borderTopWidth: 1, borderLeftWidth: 1,
+    borderRightWidth: 1, borderBottomWidth: 1,
+    borderTopColor: theme.shadow, borderLeftColor: theme.shadow,
+    borderRightColor: theme.highlight, borderBottomColor: theme.highlight,
   },
-  pathBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: '#ccc',
-  },
-  pathTxt: { flex: 1, fontSize: 12, color: '#555' },
-  sortBar: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 8, gap: 8,
-    borderBottomWidth: 1, borderBottomColor: '#ccc',
-  },
-  sortLabel: { fontSize: 14, color: '#000', marginRight: 4 },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#000' },
-  chipActive: { backgroundColor: '#000' },
-  chipTxt: { fontSize: 14, color: '#000' },
-  chipTxtActive: { color: '#fff' },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#000' },
-  btnActive: { backgroundColor: '#000' },
-  btnTxt: { fontSize: 14, color: '#000' },
-  btnTxtMuted: { color: '#999' },
-  btnTxtPrimary: { color: '#fff' },
-  grid: { padding: 8 },
-  tile: { padding: 6, alignItems: 'center' },
-  thumb: { width: '100%', aspectRatio: 1, backgroundColor: '#eee' },
   folderThumb: {
-    width: '100%', aspectRatio: 1, backgroundColor: '#f4f4f4',
-    borderWidth: 1, borderColor: '#000',
+    width: '100%', aspectRatio: 1, backgroundColor: theme.bg,
+    borderTopWidth: 1, borderLeftWidth: 1,
+    borderRightWidth: 1, borderBottomWidth: 1,
+    borderTopColor: theme.highlight, borderLeftColor: theme.highlight,
+    borderRightColor: theme.dark, borderBottomColor: theme.dark,
     alignItems: 'center', justifyContent: 'center',
   },
-  folderIcon: { fontSize: 40 },
-  tileName: { marginTop: 4, fontSize: 12, color: '#000', textAlign: 'center' },
+  folderIcon: { fontFamily: 'VT323', fontSize: 22, color: theme.text },
+  tileName: { marginTop: 4, fontFamily: 'VT323', fontSize: 14, color: theme.text, textAlign: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  empty: { fontSize: 16, color: '#000', marginBottom: 4 },
-  emptySub: { fontSize: 13, color: '#444', textAlign: 'center', marginBottom: 12 },
-  emptyHint: { fontSize: 12, color: '#666', textAlign: 'center' },
+  empty: { fontFamily: 'VT323', fontSize: 18, color: theme.text, marginBottom: 4 },
+  emptySub: { fontFamily: 'VT323', fontSize: 14, color: theme.textMuted, textAlign: 'center', marginBottom: 12 },
+  emptyHint: { fontFamily: 'VT323', fontSize: 14, color: theme.textMuted, textAlign: 'center' },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(192,192,192,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

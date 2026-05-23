@@ -12,7 +12,7 @@ POST /start                    -> begin capture loop
 POST /stop                     -> pause capture loop
 POST /source  {source, ...}    -> change capture source (full screen, region, window)
 POST /interval {interval_sec}  -> change capture interval
-POST /adjust  {fade, brightness, contrast, gamma}
+POST /adjust  {fade, brightness, contrast, gamma, dither}
                                -> apply tone adjustments to served frames
 POST /resolution {mul}         -> downscale factor (0.1..1.0) applied to frames
 GET  /windows                  -> JSON list of visible windows from Quartz
@@ -22,20 +22,47 @@ POST /birefnet                 -> request body is PNG image bytes; response
                                   is PNG with background removed (composited
                                   onto white). Requires `torch` and
                                   `transformers` to be installed.
+GET  /drop/list                -> JSON list of files dropped into the watch
+                                  folder, newest first
+GET  /drop/file?name=<name>    -> binary content of a dropped file
+POST /drop/consume {name}      -> mark a dropped file as consumed (renames
+                                  it out of the watch folder)
+POST /sketch                   -> request body is PNG bytes (a lasso export
+                                  from the Manta); saves to ~/Drop with a
+                                  timestamped filename so the user can pick
+                                  it up
+GET  /presets                  -> JSON list of named adjustment presets
+POST /presets  {name, ...}     -> save a preset (overwrites by name)
+DELETE /presets/<name>         -> remove a preset
 """
 from __future__ import annotations
 
 import io
+import json
 import logging
+import os
 import socket
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 import mss
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from PIL import Image, ImageEnhance
+
+# Persisted data lives here. Watch folder is what users drop / airdrop
+# files into; presets file holds named adjustment combos.
+DATA_DIR = Path.home() / "EmbedImage"
+WATCH_DIR = DATA_DIR / "Drop"
+CONSUMED_DIR = DATA_DIR / "Drop" / ".consumed"
+PRESETS_PATH = DATA_DIR / "presets.json"
+SKETCHES_DIR = DATA_DIR / "Sketches"
+for _d in (DATA_DIR, WATCH_DIR, CONSUMED_DIR, SKETCHES_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
+
+DROP_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif"}
 
 
 # Adjustment ranges must match src/AdjustmentPanel.tsx on the plugin side:
@@ -43,7 +70,14 @@ from PIL import Image, ImageEnhance
 #   brightness -100..100
 #   contrast   -100..100
 #   gamma       0.2..3.0  (1.0 = identity)
-_DEFAULT_ADJUST = {"fade": 0, "brightness": 0, "contrast": 0, "gamma": 1.0}
+#   dither      "none" | "fs1" | "fs4" | "atkinson"  (Manta has 4-level gray)
+_DEFAULT_ADJUST = {
+    "fade": 0,
+    "brightness": 0,
+    "contrast": 0,
+    "gamma": 1.0,
+    "dither": "none",
+}
 
 
 def _is_identity_adjust(a: dict) -> bool:
@@ -52,11 +86,45 @@ def _is_identity_adjust(a: dict) -> bool:
         and int(a.get("brightness", 0)) == 0
         and int(a.get("contrast", 0)) == 0
         and abs(float(a.get("gamma", 1.0)) - 1.0) < 1e-6
+        and str(a.get("dither", "none")) == "none"
     )
 
 
+def _dither(img: Image.Image, mode: str) -> Image.Image:
+    """Quantize to a small palette using error-diffusion. PIL's built-in
+    Floyd-Steinberg via convert('1') / convert('P') is fine for most;
+    we expose 1-bit ('fs1') and 4-level grayscale ('fs4', the Manta's
+    native range) and Atkinson (classic Mac-look) implemented manually."""
+    if mode == "fs1":
+        return img.convert("L").convert("1").convert("RGB")
+    if mode == "fs4":
+        # 4-level gray palette (black, dark gray, light gray, white).
+        pal_img = Image.new("P", (1, 1))
+        pal = [0, 0, 0, 85, 85, 85, 170, 170, 170, 255, 255, 255] + [0] * (256 * 3 - 12)
+        pal_img.putpalette(pal)
+        g = img.convert("L").convert("RGB")
+        return g.quantize(palette=pal_img, dither=Image.FLOYDSTEINBERG).convert("RGB")
+    if mode == "atkinson":
+        import numpy as np
+
+        arr = np.asarray(img.convert("L"), dtype=np.float32).copy()
+        h, w = arr.shape
+        for y in range(h):
+            for x in range(w):
+                old = arr[y, x]
+                new = 0.0 if old < 128 else 255.0
+                arr[y, x] = new
+                err = (old - new) / 8.0
+                for dx, dy in ((1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h:
+                        arr[ny, nx] += err
+        return Image.fromarray(arr.clip(0, 255).astype("uint8"), "L").convert("RGB")
+    return img
+
+
 def _apply_adjust(img: Image.Image, a: dict) -> Image.Image:
-    """Apply brightness/contrast/gamma/fade to an RGB PIL image."""
+    """Apply brightness/contrast/gamma/fade/dither to an RGB PIL image."""
     if _is_identity_adjust(a):
         return img
     out = img
@@ -64,9 +132,9 @@ def _apply_adjust(img: Image.Image, a: dict) -> Image.Image:
     contrast = int(a.get("contrast", 0))
     gamma = float(a.get("gamma", 1.0))
     fade = int(a.get("fade", 0))
+    dither = str(a.get("dither", "none"))
 
     if brightness:
-        # -100..100 maps to PIL factor 0..2 (1.0 = unchanged).
         out = ImageEnhance.Brightness(out).enhance(1.0 + brightness / 100.0)
     if contrast:
         out = ImageEnhance.Contrast(out).enhance(1.0 + contrast / 100.0)
@@ -78,6 +146,8 @@ def _apply_adjust(img: Image.Image, a: dict) -> Image.Image:
         alpha = max(0, min(100, fade)) / 100.0
         white = Image.new("RGB", out.size, (255, 255, 255))
         out = Image.blend(out, white, alpha)
+    if dither and dither != "none":
+        out = _dither(out, dither)
     return out
 
 try:
@@ -277,6 +347,8 @@ def status():
                 "last_error": STATE.last_error,
                 "ip": get_local_ip(),
                 "monitor": mon,
+                "drop_count": len(_drop_list()),
+                "watch_folder": str(WATCH_DIR),
             }
         )
 
@@ -333,6 +405,9 @@ def set_interval():
     return jsonify({"ok": True, "interval_sec": STATE.interval_sec})
 
 
+_VALID_DITHER = {"none", "fs1", "fs4", "atkinson"}
+
+
 @app.route("/adjust", methods=["POST"])
 def set_adjust():
     body = request.get_json(force=True, silent=True) or {}
@@ -346,6 +421,9 @@ def set_adjust():
             new["contrast"] = max(-100, min(100, int(body["contrast"])))
         if "gamma" in body:
             new["gamma"] = max(0.2, min(3.0, float(body["gamma"])))
+        if "dither" in body:
+            d = str(body["dither"] or "none")
+            new["dither"] = d if d in _VALID_DITHER else "none"
     except (TypeError, ValueError):
         return jsonify({"error": "invalid adjust value"}), 400
     STATE.adjust = new
@@ -506,6 +584,129 @@ def birefnet():
     buf = io.BytesIO()
     out.save(buf, format="PNG", optimize=False)
     return buf.getvalue(), 200, {"Content-Type": "image/png"}
+
+
+# ---- Watch folder (drop / airdrop area) ----
+
+def _drop_list() -> list:
+    items = []
+    for p in WATCH_DIR.iterdir():
+        if not p.is_file():
+            continue
+        if p.name.startswith("."):
+            continue
+        if p.suffix.lower() not in DROP_EXTS:
+            continue
+        st = p.stat()
+        items.append({
+            "name": p.name,
+            "size": st.st_size,
+            "mtime": st.st_mtime,
+        })
+    items.sort(key=lambda x: -x["mtime"])
+    return items
+
+
+@app.route("/drop/list")
+def drop_list():
+    return jsonify({
+        "folder": str(WATCH_DIR),
+        "items": _drop_list(),
+    })
+
+
+@app.route("/drop/file")
+def drop_file():
+    name = request.args.get("name", "")
+    if "/" in name or name.startswith("."):
+        return jsonify({"error": "invalid name"}), 400
+    path = WATCH_DIR / name
+    if not path.is_file():
+        return jsonify({"error": "not found"}), 404
+    return send_file(str(path), mimetype="application/octet-stream")
+
+
+@app.route("/drop/consume", methods=["POST"])
+def drop_consume():
+    body = request.get_json(force=True, silent=True) or {}
+    name = str(body.get("name", ""))
+    if "/" in name or name.startswith("."):
+        return jsonify({"error": "invalid name"}), 400
+    path = WATCH_DIR / name
+    if not path.is_file():
+        return jsonify({"error": "not found"}), 404
+    dst = CONSUMED_DIR / f"{int(time.time())}_{path.name}"
+    path.rename(dst)
+    log(f"drop consumed: {name}")
+    return jsonify({"ok": True})
+
+
+# ---- Sketches uploaded from the Manta (lasso -> Mac) ----
+
+@app.route("/sketch", methods=["POST"])
+def sketch():
+    raw = request.get_data(cache=False)
+    if not raw:
+        return jsonify({"error": "no body"}), 400
+    name = request.args.get("name", "")
+    if not name:
+        name = f"manta_{time.strftime('%Y%m%d_%H%M%S')}.png"
+    if "/" in name or name.startswith("."):
+        return jsonify({"error": "invalid name"}), 400
+    path = SKETCHES_DIR / name
+    path.write_bytes(raw)
+    log(f"sketch saved: {path}")
+    return jsonify({"ok": True, "path": str(path), "name": name})
+
+
+# ---- Adjustment presets ----
+
+def _read_presets() -> list:
+    if not PRESETS_PATH.exists():
+        return []
+    try:
+        data = json.loads(PRESETS_PATH.read_text())
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_presets(items: list) -> None:
+    PRESETS_PATH.write_text(json.dumps(items, indent=2))
+
+
+@app.route("/presets")
+def get_presets():
+    return jsonify(_read_presets())
+
+
+@app.route("/presets", methods=["POST"])
+def save_preset():
+    body = request.get_json(force=True, silent=True) or {}
+    name = str(body.get("name", "")).strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    preset = {
+        "name": name,
+        "fade": int(body.get("fade", 0)),
+        "brightness": int(body.get("brightness", 0)),
+        "contrast": int(body.get("contrast", 0)),
+        "gamma": float(body.get("gamma", 1.0)),
+        "dither": str(body.get("dither", "none")),
+    }
+    items = [p for p in _read_presets() if p.get("name") != name]
+    items.append(preset)
+    _write_presets(items)
+    log(f"preset saved: {name}")
+    return jsonify({"ok": True, "preset": preset, "presets": items})
+
+
+@app.route("/presets/<name>", methods=["DELETE"])
+def delete_preset(name):
+    items = [p for p in _read_presets() if p.get("name") != name]
+    _write_presets(items)
+    log(f"preset deleted: {name}")
+    return jsonify({"ok": True, "presets": items})
 
 
 def run_server(host: str, port: int) -> None:

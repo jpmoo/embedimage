@@ -7,16 +7,16 @@ AppRegistry.registerComponent(appName, () => App);
 
 PluginManager.init();
 
-// Button IDs. App.tsx reads the last pressed id off PluginManager and
-// switches to the "refresh" headless flow if it sees BUTTON_REFRESH.
+// Button IDs. App.tsx watches the most recent press and routes to the
+// matching headless screen if applicable.
 export const BUTTON_MAIN = 1;
 export const BUTTON_REFRESH = 2;
+export const BUTTON_DROP = 3;
+export const BUTTON_LASSO_SEND = 4; // lasso-toolbar button (type=2)
 
 const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 
-// type=1: sidebar button. showType=1: tap opens the plugin view (App.tsx).
-// Both buttons go through the same view; App.tsx routes based on the
-// pressed button id.
+// Sidebar buttons (type=1).
 PluginManager.registerButton(1, ['NOTE'], {
   id: BUTTON_MAIN,
   name: 'Embed Image',
@@ -31,8 +31,28 @@ PluginManager.registerButton(1, ['NOTE'], {
   showType: 1,
 });
 
+PluginManager.registerButton(1, ['NOTE'], {
+  id: BUTTON_DROP,
+  name: 'Drop Inbox',
+  icon: ICON,
+  showType: 1,
+});
+
+// Lasso-toolbar button (type=2). Appears when the user lasso-selects ink
+// on the page; tap to ship the selection to the Mac.
+try {
+  PluginManager.registerButton(2, ['NOTE'], {
+    id: BUTTON_LASSO_SEND,
+    name: 'Send to Mac',
+    icon: ICON,
+    showType: 1,
+  });
+} catch (e) {
+  // Older host versions may not support type=2; fall back silently.
+}
+
 PluginManager.registerButtonListener({
   onButtonPress: (_msg) => {
-    // Routing happens in App.tsx via PluginManager.lastButtonEventMsg.
+    // Routing happens in App.tsx via the listener it registers there.
   },
 });

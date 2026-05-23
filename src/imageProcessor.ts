@@ -47,7 +47,8 @@ export function adjustmentsAreDefault(a: Adjustments): boolean {
     a.fade === 0 &&
     a.brightness === 0 &&
     a.contrast === 0 &&
-    Math.abs(a.gamma - 1.0) < 1e-6
+    Math.abs(a.gamma - 1.0) < 1e-6 &&
+    (a.dither ?? 'none') === 'none'
   );
 }
 
@@ -86,7 +87,7 @@ export async function downloadAndBake(
 }
 
 export async function lanHttp(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE' | 'PUT',
   url: string,
   body?: object,
   timeoutMs: number = 3000,
@@ -96,7 +97,7 @@ export async function lanHttp(
 }
 
 export async function lanJson<T = any>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE' | 'PUT',
   url: string,
   body?: object,
   timeoutMs: number = 3000,
