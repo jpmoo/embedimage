@@ -12,6 +12,8 @@ POST /start                   -> begin capture loop
 POST /stop                    -> pause capture loop
 POST /source  {source, ...}   -> change capture source (full screen, region, window)
 POST /interval {interval_sec} -> change capture interval
+POST /adjust  {fade, brightness, contrast, gamma}
+                              -> apply tone adjustments to served frames
 GET  /windows                 -> JSON list of visible windows from Quartz
 """
 from __future__ import annotations
@@ -26,7 +28,50 @@ from typing import Any, Optional
 
 import mss
 from flask import Flask, jsonify, request
-from PIL import Image
+from PIL import Image, ImageEnhance
+
+
+# Adjustment ranges must match src/AdjustmentPanel.tsx on the plugin side:
+#   fade        0..100  (% blended toward white)
+#   brightness -100..100
+#   contrast   -100..100
+#   gamma       0.2..3.0  (1.0 = identity)
+_DEFAULT_ADJUST = {"fade": 0, "brightness": 0, "contrast": 0, "gamma": 1.0}
+
+
+def _is_identity_adjust(a: dict) -> bool:
+    return (
+        int(a.get("fade", 0)) == 0
+        and int(a.get("brightness", 0)) == 0
+        and int(a.get("contrast", 0)) == 0
+        and abs(float(a.get("gamma", 1.0)) - 1.0) < 1e-6
+    )
+
+
+def _apply_adjust(img: Image.Image, a: dict) -> Image.Image:
+    """Apply brightness/contrast/gamma/fade to an RGB PIL image."""
+    if _is_identity_adjust(a):
+        return img
+    out = img
+    brightness = int(a.get("brightness", 0))
+    contrast = int(a.get("contrast", 0))
+    gamma = float(a.get("gamma", 1.0))
+    fade = int(a.get("fade", 0))
+
+    if brightness:
+        # -100..100 maps to PIL factor 0..2 (1.0 = unchanged).
+        out = ImageEnhance.Brightness(out).enhance(1.0 + brightness / 100.0)
+    if contrast:
+        out = ImageEnhance.Contrast(out).enhance(1.0 + contrast / 100.0)
+    if abs(gamma - 1.0) > 1e-6 and gamma > 0:
+        inv = 1.0 / gamma
+        lut = [min(255, int(round(255.0 * (i / 255.0) ** inv))) for i in range(256)]
+        out = out.point(lut * len(out.getbands()))
+    if fade:
+        alpha = max(0, min(100, fade)) / 100.0
+        white = Image.new("RGB", out.size, (255, 255, 255))
+        out = Image.blend(out, white, alpha)
+    return out
 
 try:
     import Quartz  # provided by pyobjc-framework-Quartz
@@ -43,6 +88,7 @@ class CaptureState:
     region: Optional[dict] = None  # {x, y, w, h}
     window_id: Optional[int] = None
     interval_sec: float = 1.0
+    adjust: dict = field(default_factory=lambda: dict(_DEFAULT_ADJUST))
 
     last_frame: Optional[bytes] = None
     last_frame_ts: float = 0.0
@@ -149,6 +195,7 @@ def _capture_once(sct: mss.mss) -> Optional[bytes]:
 
     shot = sct.grab(target)
     pil = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    pil = _apply_adjust(pil, dict(STATE.adjust))
     buf = io.BytesIO()
     pil.save(buf, format="PNG", optimize=False)
     return buf.getvalue()
@@ -196,6 +243,7 @@ def status():
                 "region": STATE.region,
                 "window_id": STATE.window_id,
                 "interval_sec": STATE.interval_sec,
+                "adjust": dict(STATE.adjust),
                 "frame_count": STATE.frame_count,
                 "has_frame": STATE.last_frame is not None,
                 "last_frame_ts": STATE.last_frame_ts,
@@ -255,6 +303,26 @@ def set_interval():
     STATE.interval_sec = max(0.05, min(60.0, v))
     log(f"interval -> {STATE.interval_sec}s")
     return jsonify({"ok": True, "interval_sec": STATE.interval_sec})
+
+
+@app.route("/adjust", methods=["POST"])
+def set_adjust():
+    body = request.get_json(force=True, silent=True) or {}
+    new = dict(_DEFAULT_ADJUST)
+    try:
+        if "fade" in body:
+            new["fade"] = max(0, min(100, int(body["fade"])))
+        if "brightness" in body:
+            new["brightness"] = max(-100, min(100, int(body["brightness"])))
+        if "contrast" in body:
+            new["contrast"] = max(-100, min(100, int(body["contrast"])))
+        if "gamma" in body:
+            new["gamma"] = max(0.2, min(3.0, float(body["gamma"])))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid adjust value"}), 400
+    STATE.adjust = new
+    log(f"adjust -> {new}")
+    return jsonify({"ok": True, "adjust": new})
 
 
 @app.route("/windows")

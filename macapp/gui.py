@@ -7,63 +7,150 @@ IP/port the plugin should target, and watch a rolling log.
 """
 from __future__ import annotations
 
-import threading
 import time
 import tkinter as tk
 from tkinter import ttk
 
+import mss
+from PIL import Image, ImageTk
+
 from . import server
 
 
-# ---- Region picker overlay ----
+# ---- Region picker (embedded thumbnail) ----
+
+REGION_PREVIEW_MAX = 640
+
 
 class RegionPicker:
-    """A topmost semi-transparent window that lets the user drag a rectangle."""
+    """Modal window showing a downscaled screenshot; drag to select region.
 
-    def __init__(self, on_done):
+    The user's screen is captured once and rendered into the dialog at
+    around 640px wide. Drag coordinates on the canvas are mapped back to
+    monitor pixels so the live capture loop crops the right area.
+    """
+
+    def __init__(self, parent, on_done):
         self.on_done = on_done
-        self.root = tk.Toplevel()
-        self.root.attributes("-fullscreen", True)
-        self.root.attributes("-alpha", 0.25)
-        self.root.configure(background="#000")
-        self.root.attributes("-topmost", True)
-        self.canvas = tk.Canvas(self.root, bg="#000", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
+
+        with mss.mss() as sct:
+            monitors = sct.monitors
+            mon = monitors[1] if len(monitors) > 1 else monitors[0]
+            shot = sct.grab(mon)
+            pil_full = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+
+        self.mon_x = int(mon["left"])
+        self.mon_y = int(mon["top"])
+        self.mon_w = int(mon["width"])
+        self.mon_h = int(mon["height"])
+
+        scale = REGION_PREVIEW_MAX / max(self.mon_w, self.mon_h)
+        self.scale = scale
+        thumb_w = max(1, int(self.mon_w * scale))
+        thumb_h = max(1, int(self.mon_h * scale))
+        pil_thumb = pil_full.resize((thumb_w, thumb_h), Image.LANCZOS)
+
+        self.root = tk.Toplevel(parent)
+        self.root.title("Select region")
+        self.root.transient(parent)
+        self.root.grab_set()
+        self.root.resizable(False, False)
+
+        self.hint = ttk.Label(
+            self.root,
+            text="Drag on the preview to pick a region. Esc to cancel.",
+            foreground="#444",
+        )
+        self.hint.pack(padx=8, pady=(8, 4))
+
+        self._photo = ImageTk.PhotoImage(pil_thumb)
+        self.canvas = tk.Canvas(
+            self.root, width=thumb_w, height=thumb_h, highlightthickness=1,
+            highlightbackground="#888", cursor="crosshair",
+        )
+        self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        self.canvas.pack(padx=8, pady=4)
+
+        self.size_label = ttk.Label(self.root, text="(no selection)", foreground="#666")
+        self.size_label.pack(padx=8, pady=4)
+
+        btn_row = ttk.Frame(self.root)
+        btn_row.pack(padx=8, pady=(0, 8), fill="x")
+        ttk.Button(btn_row, text="Cancel", command=self._cancel).pack(side="right", padx=4)
+        self.ok_btn = ttk.Button(btn_row, text="Use selection", command=self._confirm, state="disabled")
+        self.ok_btn.pack(side="right", padx=4)
+        ttk.Button(btn_row, text="Full screen", command=self._use_full).pack(side="left", padx=4)
+
         self.start = None
         self.rect_id = None
+        self.selection = None  # (cx0, cy0, cx1, cy1) in canvas pixels
+
         self.canvas.bind("<Button-1>", self._on_down)
         self.canvas.bind("<B1-Motion>", self._on_move)
         self.canvas.bind("<ButtonRelease-1>", self._on_up)
         self.root.bind("<Escape>", lambda _: self._cancel())
+        self.root.bind("<Return>", lambda _: self._confirm() if self.selection else None)
+        self.root.protocol("WM_DELETE_WINDOW", self._cancel)
 
     def _on_down(self, e):
-        self.start = (e.x_root, e.y_root)
+        self.start = (e.x, e.y)
         if self.rect_id:
             self.canvas.delete(self.rect_id)
         self.rect_id = self.canvas.create_rectangle(
-            e.x, e.y, e.x, e.y, outline="#fff", width=2
+            e.x, e.y, e.x, e.y, outline="#ff3", width=2,
         )
 
     def _on_move(self, e):
-        if not self.start or not self.rect_id:
+        if self.start is None or self.rect_id is None:
             return
-        x0 = self.start[0] - self.root.winfo_rootx()
-        y0 = self.start[1] - self.root.winfo_rooty()
-        self.canvas.coords(self.rect_id, x0, y0, e.x, e.y)
+        self.canvas.coords(self.rect_id, self.start[0], self.start[1], e.x, e.y)
+        self._update_size_label(self.start[0], self.start[1], e.x, e.y)
 
     def _on_up(self, e):
-        if not self.start:
-            self._cancel()
+        if self.start is None:
             return
         x0, y0 = self.start
-        x1, y1 = e.x_root, e.y_root
-        x, y = min(x0, x1), min(y0, y1)
-        w, h = abs(x1 - x0), abs(y1 - y0)
+        x1, y1 = e.x, e.y
+        cw = abs(x1 - x0)
+        ch = abs(y1 - y0)
+        if cw < 4 or ch < 4:
+            if self.rect_id:
+                self.canvas.delete(self.rect_id)
+                self.rect_id = None
+            self.selection = None
+            self.size_label.config(text="(too small — drag a bigger box)")
+            self.ok_btn.config(state="disabled")
+            return
+        self.selection = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        self._update_size_label(x0, y0, x1, y1)
+        self.ok_btn.config(state="normal")
+
+    def _update_size_label(self, x0, y0, x1, y1):
+        cw = abs(x1 - x0)
+        ch = abs(y1 - y0)
+        sw = round(cw / self.scale)
+        sh = round(ch / self.scale)
+        self.size_label.config(text=f"selection: {sw}×{sh} px (preview {cw}×{ch})")
+
+    def _to_monitor(self):
+        if not self.selection:
+            return None
+        cx0, cy0, cx1, cy1 = self.selection
+        return {
+            "x": self.mon_x + round(cx0 / self.scale),
+            "y": self.mon_y + round(cy0 / self.scale),
+            "w": round((cx1 - cx0) / self.scale),
+            "h": round((cy1 - cy0) / self.scale),
+        }
+
+    def _confirm(self):
+        region = self._to_monitor()
         self.root.destroy()
-        if w < 20 or h < 20:
-            self.on_done(None)
-        else:
-            self.on_done({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+        self.on_done(region)
+
+    def _use_full(self):
+        self.root.destroy()
+        self.on_done({"x": self.mon_x, "y": self.mon_y, "w": self.mon_w, "h": self.mon_h})
 
     def _cancel(self):
         self.root.destroy()
@@ -181,20 +268,18 @@ class App:
             self.window_combo.current(0)
 
     def _pick_region(self):
-        self.root.iconify()
-        time.sleep(0.2)
-
         def done(region):
-            self.root.deiconify()
             if region:
-                self.region_label.config(text=f"{region['w']}×{region['h']} @ {region['x']},{region['y']}")
+                self.region_label.config(
+                    text=f"{region['w']}×{region['h']} @ {region['x']},{region['y']}"
+                )
                 self._region = region
                 self.source_var.set("region")
                 self._send_source()
             else:
                 self._log("region pick cancelled")
 
-        RegionPicker(done)
+        RegionPicker(self.root, done)
 
     def _send_source(self):
         src = self.source_var.get()

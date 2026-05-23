@@ -23,6 +23,11 @@ import {
   StreamConfig,
 } from '../types';
 
+// During live capture the Mac server bakes adjustments into each frame
+// before sending, so the Supernote-side bake should be identity. This
+// trips the native module's fast path (no per-pixel loop).
+const IDENTITY_ADJUSTMENTS: Adjustments = DEFAULT_ADJUSTMENTS;
+
 const PREVIEW_MAX_DIM = 800;
 const MIN_INTERVAL_SEC = 0.2;
 const MAX_INTERVAL_SEC = 60;
@@ -68,8 +73,29 @@ export function CaptureScreen({
   }, []);
 
   const url = baseUrl(config);
-  const adjustmentsRef = useRef(adjustments);
-  adjustmentsRef.current = adjustments;
+
+  // Debounced push of adjustments to the Mac server. The server applies
+  // them to each captured frame; the Supernote-side bake then runs an
+  // identity pass and skips the per-pixel loop.
+  useEffect(() => {
+    if (!url) return;
+    const timer = setTimeout(() => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 2000);
+      fetch(`${url}/adjust`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(adjustments),
+        signal: ctrl.signal,
+      })
+        .then(() => clearTimeout(t))
+        .catch((e: any) => {
+          clearTimeout(t);
+          pushLog(`adjust push failed: ${e?.message ?? e}`);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [adjustments, url, pushLog]);
 
   const fetchOnce = useCallback(async (): Promise<string | null> => {
     if (!url) {
@@ -81,7 +107,7 @@ export function CaptureScreen({
     try {
       const path = await downloadAndBake(
         `${url}/frame`,
-        adjustmentsRef.current,
+        IDENTITY_ADJUSTMENTS,
         PREVIEW_MAX_DIM,
         Math.max(2000, Math.round(intervalSec * 1500)),
       );
@@ -163,7 +189,7 @@ export function CaptureScreen({
     setBusy(true);
     pushLog('insert: baking full-res…');
     try {
-      const fullPath = await downloadAndBake(`${url}/frame`, adjustmentsRef.current, 0, 8000);
+      const fullPath = await downloadAndBake(`${url}/frame`, IDENTITY_ADJUSTMENTS, 0, 8000);
       const newTrack = await insertAndTrack(fullPath);
       if (newTrack) {
         setTrack(newTrack);
@@ -186,7 +212,7 @@ export function CaptureScreen({
     setBusy(true);
     pushLog('replace: baking full-res…');
     try {
-      const fullPath = await downloadAndBake(`${url}/frame`, adjustmentsRef.current, 0, 8000);
+      const fullPath = await downloadAndBake(`${url}/frame`, IDENTITY_ADJUSTMENTS, 0, 8000);
       const newTrack = await replaceInPlace(track, fullPath);
       if (newTrack) {
         setTrack(newTrack);

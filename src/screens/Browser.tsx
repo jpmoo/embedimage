@@ -82,7 +82,6 @@ export function BrowserScreen({
   const [entries, setEntries] = useState<Entry[]>([]);
   const [sort, setSort] = useState<SortKey>('date_desc');
   const [columns, setColumns] = useState<number>(DEFAULT_COLUMNS);
-  const [sdRoots, setSdRoots] = useState<string[]>([]);
   const [status, setStatus] = useState<string>('starting…');
 
   const load = useCallback(async (dir: string) => {
@@ -146,31 +145,12 @@ export function BrowserScreen({
     load(currentDir);
   }, [currentDir, load]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res: any = await (FileUtils as any).getExternalDirPath?.();
-        if (cancelled) return;
-        const list: string[] = Array.isArray(res)
-          ? res.filter((p) => typeof p === 'string' && p && p !== INTERNAL_ROOT)
-          : [];
-        setSdRoots(list);
-      } catch {
-        // device may not expose any external storage; ignore.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const allRoots = useMemo(() => [INTERNAL_ROOT, ...sdRoots], [sdRoots]);
-  const currentRoot = useMemo(() => {
-    return (
-      allRoots.find((r) => currentDir === r || currentDir.startsWith(r + '/')) ?? INTERNAL_ROOT
-    );
-  }, [allRoots, currentDir]);
+  // Note: previous versions probed FileUtils.getExternalDirPath() to expose
+  // SD-card roots. The new Manta firmware leaves getCurrentActivity() null
+  // when the JS bundle first runs, so that native call throws an NPE that
+  // bypasses our try/catch and tears the RN bridge down. Use "Browse…"
+  // (system picker) for SD / WebDAV instead.
+  const currentRoot = INTERNAL_ROOT;
 
   const sorted = useMemo(() => sortEntries(entries, sort), [entries, sort]);
 
@@ -250,26 +230,11 @@ export function BrowserScreen({
           <Text style={styles.btnTxt}>Home</Text>
         </Pressable>
         <Pressable
-          style={[styles.btn, currentRoot === INTERNAL_ROOT && styles.btnActive]}
+          style={[styles.btn, styles.btnActive]}
           onPress={() => setCurrentDir(INTERNAL_ROOT)}
         >
-          <Text style={[styles.btnTxt, currentRoot === INTERNAL_ROOT && styles.btnTxtPrimary]}>
-            Internal
-          </Text>
+          <Text style={[styles.btnTxt, styles.btnTxtPrimary]}>Internal</Text>
         </Pressable>
-        {sdRoots.map((r, i) => {
-          const active = currentRoot === r;
-          const label = sdRoots.length > 1 ? `SD ${i + 1}` : 'SD';
-          return (
-            <Pressable
-              key={r}
-              style={[styles.btn, active && styles.btnActive]}
-              onPress={() => setCurrentDir(r)}
-            >
-              <Text style={[styles.btnTxt, active && styles.btnTxtPrimary]}>{label}</Text>
-            </Pressable>
-          );
-        })}
         <Text style={styles.pathTxt} numberOfLines={1} ellipsizeMode="head">{currentDir}</Text>
       </View>
 

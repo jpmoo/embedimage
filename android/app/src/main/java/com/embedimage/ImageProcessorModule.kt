@@ -103,6 +103,24 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
 
             val w = src.width
             val h = src.height
+
+            val isIdentity = whiteAlpha <= 0.0
+                && brightness == 0
+                && contrast == 0
+                && kotlin.math.abs(gamma - 1.0) < 1e-6
+
+            val tag = if (previewMaxDim > 0) "prev" else "embed"
+            val outFile = File(reactApplicationContext.cacheDir, "${tag}_${System.currentTimeMillis()}.png")
+
+            if (isIdentity) {
+                // Identity adjustments — skip the per-pixel loop. Saves real
+                // CPU on Manta when the Mac server already baked the look in.
+                FileOutputStream(outFile).use { stream ->
+                    src.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                }
+                return outFile.absolutePath
+            }
+
             val pixels = IntArray(w * h)
             src.getPixels(pixels, 0, w, 0, 0, w, h)
 
@@ -147,8 +165,6 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
             val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             out.setPixels(pixels, 0, w, 0, 0, w, h)
 
-            val tag = if (previewMaxDim > 0) "prev" else "embed"
-            val outFile = File(reactApplicationContext.cacheDir, "${tag}_${System.currentTimeMillis()}.png")
             FileOutputStream(outFile).use { stream ->
                 out.compress(Bitmap.CompressFormat.PNG, 100, stream)
             }
