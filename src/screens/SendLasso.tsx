@@ -46,10 +46,10 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         }
         if (cancelled) return;
         setStatus('Exporting lasso…');
-        // Ask the SDK to write the lasso preview. We pass a writable
-        // directory it can create files under; the SDK returns the
-        // actual file path it chose.
-        const tmpPath = `/data/local/tmp/lasso_${Date.now()}.png`;
+        // The plugin process can write into the pluginhost's own cache
+        // dir; /data/local/tmp is adb-shell-only so the SDK silently
+        // fails to write there.
+        const tmpPath = `/data/user/0/com.ratta.supernote.pluginhost/cache/lasso_${Date.now()}.png`;
         let res: any;
         try {
           res = await PluginCommAPI.generateLassoPreview(tmpPath);

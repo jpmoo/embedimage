@@ -88,14 +88,7 @@ async function refreshTrackRect(track: EmbedTrack): Promise<EmbedTrack> {
 export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Promise<EmbedTrack | null> {
   const fresh = await refreshTrackRect(track);
 
-  // Delete the previous embed by its index within the page.
-  try {
-    await PluginFileAPI.deleteElements(fresh.notePath, fresh.page, [fresh.numInPage]);
-  } catch (e: any) {
-    throw new Error(`delete failed: ${e?.message ?? e}`);
-  }
-
-  const newElement = {
+  const elementBase = {
     type: 200, // Element.TYPE_PICTURE
     pageNum: fresh.page,
     layerNum: fresh.layerNum,
@@ -105,13 +98,47 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     },
   };
 
+  // Preferred path: ask the SDK to modify the existing element in place.
+  // This is atomic from the user's POV so a failure can never leave the
+  // page with no embed (the previous bug was delete-then-insert: when
+  // insert failed the user lost their image with nothing to show).
+  let modifiedOk = false;
   try {
-    const ins: any = await PluginFileAPI.insertElements(fresh.notePath, fresh.page, [newElement as any]);
-    if (ins && ins.success === false) {
-      throw new Error(ins?.error?.message ?? 'insertElements failed');
+    const modElement = {
+      ...elementBase,
+      uuid: fresh.uuid,
+      numInPage: fresh.numInPage,
+    };
+    const mod: any = await PluginFileAPI.modifyElements(
+      fresh.notePath, fresh.page, [modElement as any],
+    );
+    if (mod && mod.success !== false) {
+      const idxs: any[] = mod?.result ?? [];
+      modifiedOk = Array.isArray(idxs) ? idxs.length > 0 : true;
     }
-  } catch (e: any) {
-    throw new Error(`insert failed: ${e?.message ?? e}`);
+  } catch {
+    modifiedOk = false;
+  }
+
+  // Fallback path: insert-then-delete. This way a failed insert leaves
+  // the original embed untouched (the opposite of delete-then-insert).
+  if (!modifiedOk) {
+    try {
+      const ins: any = await PluginFileAPI.insertElements(
+        fresh.notePath, fresh.page, [elementBase as any],
+      );
+      if (ins && ins.success === false) {
+        throw new Error(ins?.error?.message ?? 'insertElements failed');
+      }
+    } catch (e: any) {
+      throw new Error(`insert failed (original embed kept): ${e?.message ?? e}`);
+    }
+    // Only delete the old one once the new one is safely in place.
+    try {
+      await PluginFileAPI.deleteElements(fresh.notePath, fresh.page, [fresh.numInPage]);
+    } catch {
+      // Non-fatal: user now has two pictures; better than zero.
+    }
   }
 
   try {
@@ -126,6 +153,10 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
   } catch {
     newTrack = null;
   }
+  // If modifyElements worked the uuid stays the same and getLastElement
+  // may return a different element (e.g. an ink stroke added after);
+  // fall back to the existing track so the next Replace still works.
+  if (!newTrack && modifiedOk) newTrack = fresh;
   if (newTrack) await saveEmbedTrack(newTrack).catch(() => {});
   return newTrack;
 }
