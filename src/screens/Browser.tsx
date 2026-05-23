@@ -17,6 +17,8 @@ import { MenuBar, StatusBar, TitleBar, Win95Button, Win95Frame, Win95InsetPanel 
 import { useConnStatus } from '../useConnStatus';
 import type { Entry, EntryKind, SortKey, StreamConfig } from '../types';
 import { DEFAULT_STREAM_CONFIG } from '../types';
+import { makeSession, StitchSession } from './StitchEditor';
+import type { StitchImage } from '../imageProcessor';
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 const INTERNAL_ROOT = '/storage/emulated/0';
@@ -77,12 +79,14 @@ export function BrowserScreen({
   onOpenCapture,
   onClose,
   busy,
+  onStitchReady,
 }: {
   onPickFile: (entry: Entry) => void;
   onOpenSettings: () => void;
   onOpenCapture: () => void;
   onClose: () => void;
   busy: boolean;
+  onStitchReady?: (session: StitchSession) => void;
 }): React.JSX.Element {
   const [currentDir, setCurrentDir] = useState<string>(DEFAULT_DIR);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -165,15 +169,49 @@ export function BrowserScreen({
 
   const sorted = useMemo(() => sortEntries(entries, sort), [entries, sort]);
 
+  // Stitch-pick state: when the user opens Tools → Stitch we flip into
+  // pick mode. First tap on an image becomes image 1; second tap becomes
+  // image 2 and immediately opens the StitchEditor.
+  const [stitchPick, setStitchPick] = useState<{ first: StitchImage | null } | null>(null);
+
+  const measureImage = useCallback((path: string): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+      Image.getSize('file://' + path, (w, h) => resolve({ width: w, height: h }), (e) => reject(e));
+    });
+  }, []);
+
   const onPickEntry = useCallback(
-    (entry: Entry) => {
+    async (entry: Entry) => {
       if (entry.kind === 'folder') {
         setCurrentDir(entry.path);
-      } else {
-        onPickFile(entry);
+        return;
       }
+      if (stitchPick && onStitchReady) {
+        // Resolve dimensions before constructing the session — the
+        // editor needs them up front to lay out the preview.
+        try {
+          const dim = await measureImage(entry.path);
+          const img: StitchImage = {
+            path: entry.path, width: dim.width, height: dim.height,
+            crop: { cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 },
+          };
+          if (!stitchPick.first) {
+            setStitchPick({ first: img });
+            setStatus(`Stitch · picked "${entry.name}" — tap a second image`);
+          } else {
+            const session = makeSession(stitchPick.first, img);
+            setStitchPick(null);
+            setStatus('Opening stitch editor…');
+            onStitchReady(session);
+          }
+        } catch (e: any) {
+          setStatus(`stitch pick failed: ${e?.message ?? e}`);
+        }
+        return;
+      }
+      onPickFile(entry);
     },
-    [onPickFile],
+    [onPickFile, stitchPick, onStitchReady, measureImage],
   );
 
   const onSystemPicker = useCallback(async () => {
@@ -245,6 +283,21 @@ export function BrowserScreen({
             label: 'Tools',
             items: [
               { label: 'Live Capture…', onPress: onOpenCapture },
+              { separator: true, label: '' },
+              {
+                label: stitchPick ? 'Cancel stitch pick' : 'Stitch two images…',
+                onPress: () => {
+                  if (stitchPick) {
+                    setStitchPick(null);
+                    setStatus('Stitch pick cancelled.');
+                  } else if (onStitchReady) {
+                    setStitchPick({ first: null });
+                    setStatus('Stitch · tap an image to pick the first');
+                  }
+                },
+                disabled: !onStitchReady,
+              },
+              { separator: true, label: '' },
               { label: 'Settings…', onPress: onOpenSettings },
             ],
           },

@@ -2,6 +2,7 @@ package com.embedimage
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -381,6 +382,100 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         } catch (e: Throwable) {
             promise.reject("E_APPEND", e.message ?: e.toString(), e)
         }
+    }
+
+    // Inkling-style two-image stitch compositor. Crops are 0..1 fractions
+    // of each source image; overlap is in source-pixel units (matches the
+    // editor's coordinate space). topLayerIndex picks which image draws
+    // on top in the overlap zone.
+    @ReactMethod
+    fun composeStitch(
+        img1Path: String, img2Path: String,
+        crop1Top: Double, crop1Bottom: Double, crop1Left: Double, crop1Right: Double,
+        crop2Top: Double, crop2Bottom: Double, crop2Left: Double, crop2Right: Double,
+        direction: String,
+        overlap: Int,
+        topLayerIndex: Int,
+        outPath: String,
+        promise: Promise,
+    ) {
+        var bm1: Bitmap? = null
+        var bm2: Bitmap? = null
+        var c1: Bitmap? = null
+        var c2: Bitmap? = null
+        var out: Bitmap? = null
+        try {
+            bm1 = BitmapFactory.decodeFile(img1Path)
+                ?: throw RuntimeException("decode failed: $img1Path")
+            bm2 = BitmapFactory.decodeFile(img2Path)
+                ?: throw RuntimeException("decode failed: $img2Path")
+
+            c1 = cropBitmap(bm1, crop1Left, crop1Top, crop1Right, crop1Bottom)
+            c2 = cropBitmap(bm2, crop2Left, crop2Top, crop2Right, crop2Bottom)
+
+            val isVert = direction.equals("vertical", ignoreCase = true)
+            val ovl = max(0, overlap)
+
+            val totalW: Int
+            val totalH: Int
+            val pos1x: Int; val pos1y: Int
+            val pos2x: Int; val pos2y: Int
+            if (isVert) {
+                totalW = max(c1.width, c2.width)
+                totalH = c1.height + c2.height - ovl
+                pos1x = (totalW - c1.width) / 2; pos1y = 0
+                pos2x = (totalW - c2.width) / 2; pos2y = c1.height - ovl
+            } else {
+                totalW = c1.width + c2.width - ovl
+                totalH = max(c1.height, c2.height)
+                pos1x = 0;                       pos1y = (totalH - c1.height) / 2
+                pos2x = c1.width - ovl;          pos2y = (totalH - c2.height) / 2
+            }
+
+            if (totalW <= 0 || totalH <= 0) {
+                throw RuntimeException("invalid composite size ${totalW}x${totalH}")
+            }
+            out = Bitmap.createBitmap(totalW, totalH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawColor(android.graphics.Color.WHITE)
+
+            // Draw the bottom layer first, then the top layer over it.
+            val drawOrder = if (topLayerIndex == 0) listOf(1, 0) else listOf(0, 1)
+            for (idx in drawOrder) {
+                val bm = if (idx == 0) c1 else c2
+                val x = if (idx == 0) pos1x else pos2x
+                val y = if (idx == 0) pos1y else pos2y
+                canvas.drawBitmap(bm, x.toFloat(), y.toFloat(), null)
+            }
+
+            val file = File(outPath)
+            file.parentFile?.mkdirs()
+            FileOutputStream(file).use { stream ->
+                out.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            }
+            promise.resolve(outPath)
+        } catch (e: Throwable) {
+            promise.reject("E_STITCH", e.message ?: e.toString(), e)
+        } finally {
+            bm1?.recycle(); bm2?.recycle()
+            if (c1 != null && c1 !== bm1) c1.recycle()
+            if (c2 != null && c2 !== bm2) c2.recycle()
+            out?.recycle()
+        }
+    }
+
+    private fun cropBitmap(
+        src: Bitmap,
+        left: Double, top: Double, right: Double, bottom: Double,
+    ): Bitmap {
+        val l = (left.coerceIn(0.0, 1.0) * src.width).toInt()
+        val t = (top.coerceIn(0.0, 1.0) * src.height).toInt()
+        val r = (right.coerceIn(0.0, 1.0) * src.width).toInt()
+        val b = (bottom.coerceIn(0.0, 1.0) * src.height).toInt()
+        val w = (src.width - l - r).coerceAtLeast(1)
+        val h = (src.height - t - b).coerceAtLeast(1)
+        if (l == 0 && t == 0 && w == src.width && h == src.height) return src
+        return Bitmap.createBitmap(src, l, t, w, h)
     }
 
     @ReactMethod

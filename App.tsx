@@ -9,6 +9,7 @@ import { RecognizeLasso } from './src/screens/RecognizeLasso';
 import { RefreshScreen } from './src/screens/Refresh';
 import { SettingsScreen } from './src/screens/Settings';
 import { SourcePicker } from './src/screens/SourcePicker';
+import { StitchEditor, makeSession, StitchSession } from './src/screens/StitchEditor';
 import { baseUrl, loadStreamConfig } from './src/storage';
 import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types';
 
@@ -22,6 +23,7 @@ export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('browser');
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [streamConfig, setStreamConfig] = useState<StreamConfig>(DEFAULT_STREAM_CONFIG);
+  const [stitchSession, setStitchSession] = useState<StitchSession | null>(null);
 
   useEffect(() => {
     ImageProcessor?.cleanupCache?.().catch(() => {});
@@ -62,6 +64,19 @@ export default function App(): React.JSX.Element {
 
   if (screen === 'recognizelasso') {
     return <RecognizeLasso />;
+  }
+
+  if (screen === 'stitch' && stitchSession) {
+    return (
+      <StitchEditor
+        session={stitchSession}
+        onCancel={() => { setStitchSession(null); goBrowser(); }}
+        onInserted={() => {
+          setStitchSession(null);
+          PluginManager.closePluginView().catch(() => {});
+        }}
+      />
+    );
   }
 
   if (screen === 'preview' && selectedEntry) {
@@ -106,6 +121,10 @@ export default function App(): React.JSX.Element {
       onOpenCapture={() => setScreen('capture')}
       onClose={() => {}}
       busy={false}
+      onStitchReady={(session) => {
+        setStitchSession(session);
+        setScreen('stitch');
+      }}
     />
   );
 }

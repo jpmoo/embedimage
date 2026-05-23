@@ -34,6 +34,15 @@ type ImageProcessorNative = {
     timeoutMs: number,
   ) => Promise<string>;
   appendFile: (path: string, text: string) => Promise<boolean>;
+  composeStitch: (
+    img1Path: string, img2Path: string,
+    crop1Top: number, crop1Bottom: number, crop1Left: number, crop1Right: number,
+    crop2Top: number, crop2Bottom: number, crop2Left: number, crop2Right: number,
+    direction: 'vertical' | 'horizontal',
+    overlap: number,
+    topLayerIndex: number,
+    outPath: string,
+  ) => Promise<string>;
   cleanupCache: () => Promise<number>;
   getConfigValue: (key: string) => Promise<string | null>;
   setConfigValue: (key: string, value: string | null) => Promise<boolean>;
@@ -118,4 +127,24 @@ export async function lanPostFile(
 ): Promise<string> {
   if (!native) throw new Error('ImageProcessor native module missing');
   return native.nativeHttpPostFile(url, inputPath, contentType, timeoutMs);
+}
+
+export type ImageCrop = { cropTop: number; cropBottom: number; cropLeft: number; cropRight: number };
+export type StitchImage = { path: string; width: number; height: number; crop: ImageCrop };
+export type StitchParams = { direction: 'vertical' | 'horizontal'; overlap: number; topLayerIndex: number };
+
+// Composes two cropped images into one PNG. Returns the output path.
+export async function composeStitch(
+  a: StitchImage, b: StitchImage, params: StitchParams, outPath: string,
+): Promise<string> {
+  if (!native) throw new Error('ImageProcessor native module missing');
+  return native.composeStitch(
+    a.path, b.path,
+    a.crop.cropTop, a.crop.cropBottom, a.crop.cropLeft, a.crop.cropRight,
+    b.crop.cropTop, b.crop.cropBottom, b.crop.cropLeft, b.crop.cropRight,
+    params.direction,
+    Math.max(0, Math.round(params.overlap)),
+    params.topLayerIndex === 0 ? 0 : 1,
+    outPath,
+  );
 }
