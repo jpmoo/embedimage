@@ -2,13 +2,19 @@ import { AppRegistry, Image } from 'react-native';
 import { PluginManager } from 'sn-plugin-lib';
 import App from './App';
 import { name as appName } from './app.json';
+import pluginConfig from './PluginConfig.json';
 import { runSendLassoToMac } from './src/lassoExport';
 import { loadStreamConfig } from './src/storage';
+import { FileLogger } from './src/util/FileLogger';
 import { setPendingButton } from './pendingButton';
 
 AppRegistry.registerComponent(appName, () => App);
 
 PluginManager.init();
+
+FileLogger.raw('[embedimage] bundle start', {
+  version: pluginConfig.versionName, code: pluginConfig.versionCode,
+});
 
 // Button IDs. App.tsx watches the most recent press and routes to the
 // matching headless screen if applicable.
@@ -21,11 +27,6 @@ export const BUTTON_LASSO_STITCH_LAYERS = 6;    // lasso toolbar — layer picke
 
 const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 
-// The Supernote host crashes (java.lang.NullPointerException inside
-// PluginButtonAdapter / the lifecycle that registers the button) if
-// nameMap or descMap is missing — its adapter does
-// `new HashSet<>(button.nameMap.keySet())` without a null check. Provide
-// at least the English fallback for every button.
 function mkName(label) {
   return { en: label, zh_CN: label, zh_TW: label, ja: label };
 }
@@ -40,69 +41,47 @@ const baseBtn = (id, label) => ({
   showType: 1,
 });
 
-// Sidebar buttons (type=1). The host accepts these even with a null
-// nameMap on current firmware, but we include it defensively in case
-// a future build tightens the adapter the way the lasso one does.
-PluginManager.registerButton(1, ['NOTE'], baseBtn(BUTTON_MAIN, 'Embed Image'))
-  .catch((e) => console.log('[embedimage] main button register failed:', e));
+// Helper that logs success/failure of each registration to the log
+// file so the next adb pull tells us exactly what registered.
+function regBtn(type, label, payload) {
+  return PluginManager.registerButton(type, ['NOTE'], payload)
+    .then((ok) => FileLogger.raw('[embedimage] registerButton OK', { id: payload.id, label, type, ok }))
+    .catch((e) => FileLogger.raw('[embedimage] registerButton FAIL', { id: payload.id, label, type, err: String(e?.message ?? e) }));
+}
 
-PluginManager.registerButton(1, ['NOTE'], baseBtn(BUTTON_REFRESH, 'Refresh Embed'))
-  .catch((e) => console.log('[embedimage] refresh button register failed:', e));
+regBtn(1, 'Embed Image', baseBtn(BUTTON_MAIN, 'Embed Image'));
+regBtn(1, 'Refresh Embed', baseBtn(BUTTON_REFRESH, 'Refresh Embed'));
+regBtn(1, 'Drop Inbox', baseBtn(BUTTON_DROP, 'Drop Inbox'));
 
-PluginManager.registerButton(1, ['NOTE'], baseBtn(BUTTON_DROP, 'Drop Inbox'))
-  .catch((e) => console.log('[embedimage] drop button register failed:', e));
-
-// Lasso-toolbar button (type=2). The host's area-selection adapter
-// expects `editDataTypes` (which lasso content kinds the button applies
-// to) and `nameMap`. With either missing it throws a HashSet NPE when
-// the user opens the "..." menu and the menu crashes the note app.
+// Lasso-toolbar buttons (type=2). The host's area-selection adapter
+// expects `editDataTypes` and `nameMap` — without either it throws.
 // editDataTypes values per the SDK:
 //   0 handwritten strokes  1 title  2 image  3 text  4 link  5 shapes
-//
-// showType: 0 means "headless" — no plugin view opens when the button
-// is pressed. Action runs straight from the button-press handler and
-// reports back via Toast / Ratta dialog. This is the pattern from
-// jpmoo/lassoexport, which is the only one that works for a real
-// lasso → file pipeline (using saveStickerByLasso underneath).
-PluginManager.registerButton(2, ['NOTE'], {
+regBtn(2, 'Send to Mac', {
   ...baseBtn(BUTTON_LASSO_SEND, 'Send to Mac'),
   editDataTypes: [0, 1, 2, 3, 4, 5],
-  showType: 0,
-}).catch((e) => console.log('[embedimage] lasso button register skipped:', e));
+  showType: 0, // headless — runs straight from the button listener
+});
 
-// Blended-in Inkling feature: lasso some handwriting, tap "Recognize",
-// the plugin OCRs the strokes via PluginCommAPI.recognizeElements and
-// drops the typed text back into the note. editDataTypes restricted
-// to strokes/text (no point on pure pictures). showType: 1 because the
-// recognize flow shows a progress dialog (OCR can take seconds).
-PluginManager.registerButton(2, ['NOTE'], {
+regBtn(2, 'Recognize', {
   ...baseBtn(BUTTON_LASSO_RECOGNIZE, 'Recognize'),
-  editDataTypes: [0, 1, 3],
-}).catch((e) => console.log('[embedimage] recognize button register skipped:', e));
+  editDataTypes: [0, 1, 3], // strokes / title / text
+});
 
-// Lasso → choose which note layers to include → composite as PNG.
-// Opens a layer picker (showType:1) so the user can toggle which layers
-// participate and pick transparent / white background.
-PluginManager.registerButton(2, ['NOTE'], {
+regBtn(2, 'Stitch Layers', {
   ...baseBtn(BUTTON_LASSO_STITCH_LAYERS, 'Stitch Layers'),
   editDataTypes: [0, 1, 2, 3, 4, 5],
-}).catch((e) => console.log('[embedimage] stitch-layers button register skipped:', e));
+});
 
 PluginManager.registerButtonListener({
   onButtonPress: (msg) => {
-    // showType:0 buttons don't open a view, so we handle their action
-    // here in the headless context.
+    FileLogger.raw('[embedimage] onButtonPress', msg);
     if (msg?.id === BUTTON_LASSO_SEND) {
       loadStreamConfig()
         .then((cfg) => runSendLassoToMac(cfg.lassoFormat ?? 'png'))
         .catch(() => {});
       return;
     }
-    // showType:1 buttons open the plugin view. We stash the button id
-    // synchronously so App.tsx's initial render can route to the
-    // right screen instead of briefly flashing the default Browser.
-    // The SDK *also* replays the event into App.tsx's listener, but
-    // that's racy on cold reload — pendingButton wins.
     if (msg?.id !== undefined && msg?.id !== null) {
       setPendingButton(msg.id);
     }
