@@ -1,9 +1,9 @@
 {
-  "name": "Embed PNG",
-  "desc": "Browse PNG files in Document/Images and embed them into the current note.",
+  "name": "Embed Image",
+  "desc": "Browse PNG/JPEG files in Document/Images, preview with adjustable fade, and embed into the current note.",
   "iconPath": "./assets/icon.png",
-  "versionName": "0.2.0",
-  "versionCode": "7",
+  "versionName": "0.3.0",
+  "versionCode": "8",
   "pluginID": "embedimagev0001a",
   "pluginKey": "embedimage",
   "jsMainPath": "index"
