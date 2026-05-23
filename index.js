@@ -4,6 +4,7 @@ import App from './App';
 import { name as appName } from './app.json';
 import pluginConfig from './PluginConfig.json';
 import { runSendLassoToMac } from './src/lassoExport';
+import { runQuickStitch } from './src/quickStitch';
 import { loadStreamConfig } from './src/storage';
 import { FileLogger } from './src/util/FileLogger';
 import { setPendingButton } from './pendingButton';
@@ -25,6 +26,8 @@ export const BUTTON_LASSO_SEND = 4;             // lasso toolbar — ship to Mac
 export const BUTTON_LASSO_RECOGNIZE = 5;        // lasso toolbar — OCR -> insert text
 export const BUTTON_LASSO_STITCH_LAYERS = 6;    // lasso toolbar — layer picker → image
 export const BUTTON_STITCH_LAYERS_SIDE = 7;     // sidebar duplicate of above (always visible)
+export const BUTTON_QUICK_STITCH_TRANSP = 8;    // lasso toolbar — headless stitch (transparent BG)
+export const BUTTON_QUICK_STITCH_WHITE = 9;     // lasso toolbar — headless stitch (white BG)
 
 const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 
@@ -85,6 +88,22 @@ regBtn(2, 'Stitch Layers', {
   editDataTypes: [0, 1, 2, 3, 4, 5],
 });
 
+// Headless "just do it" variants — same plumbing as Send to Mac
+// (showType:0, runs straight from the button-press handler, no plugin
+// view to open). Bypasses the routing race entirely. The view-based
+// "Stitch Layers" picker stays for users who want layer selection.
+regBtn(2, 'Stitch (transparent)', {
+  ...baseBtn(BUTTON_QUICK_STITCH_TRANSP, 'Stitch (transparent)'),
+  editDataTypes: [0, 1, 2, 3, 4, 5],
+  showType: 0,
+});
+
+regBtn(2, 'Stitch (white BG)', {
+  ...baseBtn(BUTTON_QUICK_STITCH_WHITE, 'Stitch (white BG)'),
+  editDataTypes: [0, 1, 2, 3, 4, 5],
+  showType: 0,
+});
+
 PluginManager.registerButtonListener({
   onButtonPress: (msg) => {
     FileLogger.raw('[embedimage] onButtonPress', msg);
@@ -92,6 +111,14 @@ PluginManager.registerButtonListener({
       loadStreamConfig()
         .then((cfg) => runSendLassoToMac(cfg.lassoFormat ?? 'png'))
         .catch(() => {});
+      return;
+    }
+    if (msg?.id === BUTTON_QUICK_STITCH_TRANSP) {
+      runQuickStitch(true).catch(() => {});
+      return;
+    }
+    if (msg?.id === BUTTON_QUICK_STITCH_WHITE) {
+      runQuickStitch(false).catch(() => {});
       return;
     }
     if (msg?.id !== undefined && msg?.id !== null) {
