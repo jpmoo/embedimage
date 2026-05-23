@@ -360,6 +360,36 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         reactApplicationContext.getSharedPreferences("embedimage_prefs", android.content.Context.MODE_PRIVATE)
     }
 
+    // Cross-bundle pending button handoff. The host runs index.js once
+    // in a background context to register buttons + listener, and once
+    // more in a UI context when the view opens — they're SEPARATE RN
+    // bundles with disjoint module state. So the button press fired in
+    // the background can't be read via a JS-module variable in the UI
+    // bundle. SharedPreferences bridges them.
+    //
+    // The getter is synchronous (returns a Kotlin String) so App.tsx's
+    // useState initializer can read it before any render frame.
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun getAndClearPendingButton(): String {
+        return try {
+            val v = prefs.getString("pendingButton", "") ?: ""
+            if (v.isNotEmpty()) prefs.edit().remove("pendingButton").apply()
+            v
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    @ReactMethod
+    fun setPendingButton(id: Int, promise: Promise) {
+        try {
+            prefs.edit().putString("pendingButton", id.toString()).apply()
+            promise.resolve(true)
+        } catch (e: Throwable) {
+            promise.reject("E_PENDING", e.message ?: e.toString(), e)
+        }
+    }
+
     @ReactMethod
     fun getConfigValue(key: String, promise: Promise) {
         try {
