@@ -20,7 +20,8 @@ import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types'
 const BUTTON_REFRESH = 2;
 const BUTTON_DROP = 3;
 const BUTTON_LASSO_RECOGNIZE = 5;
-const BUTTON_LASSO_STITCH_LAYERS = 6;
+const BUTTON_LASSO_STITCH_LAYERS = 6;     // lasso-toolbar entry
+const BUTTON_STITCH_LAYERS_SIDE = 7;      // sidebar entry (always-visible duplicate)
 
 function initialScreenFromPendingButton(): Screen {
   // Inkling pattern: index.js's button listener stores the pressed id
@@ -32,6 +33,7 @@ function initialScreenFromPendingButton(): Screen {
   if (id === BUTTON_DROP) return 'dropinbox';
   if (id === BUTTON_LASSO_RECOGNIZE) return 'recognizelasso';
   if (id === BUTTON_LASSO_STITCH_LAYERS) return 'layerstitch';
+  if (id === BUTTON_STITCH_LAYERS_SIDE) return 'layerstitch';
   return 'browser';
 }
 
@@ -54,6 +56,7 @@ export default function App(): React.JSX.Element {
         else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
         else if (msg?.id === BUTTON_LASSO_RECOGNIZE) setScreen('recognizelasso');
         else if (msg?.id === BUTTON_LASSO_STITCH_LAYERS) setScreen('layerstitch');
+        else if (msg?.id === BUTTON_STITCH_LAYERS_SIDE) setScreen('layerstitch');
       },
     });
     return () => {

@@ -24,6 +24,7 @@ export const BUTTON_DROP = 3;
 export const BUTTON_LASSO_SEND = 4;             // lasso toolbar — ship to Mac
 export const BUTTON_LASSO_RECOGNIZE = 5;        // lasso toolbar — OCR -> insert text
 export const BUTTON_LASSO_STITCH_LAYERS = 6;    // lasso toolbar — layer picker → image
+export const BUTTON_STITCH_LAYERS_SIDE = 7;     // sidebar duplicate of above (always visible)
 
 const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 
@@ -52,6 +53,17 @@ function regBtn(type, label, payload) {
 regBtn(1, 'Embed Image', baseBtn(BUTTON_MAIN, 'Embed Image'));
 regBtn(1, 'Refresh Embed', baseBtn(BUTTON_REFRESH, 'Refresh Embed'));
 regBtn(1, 'Drop Inbox', baseBtn(BUTTON_DROP, 'Drop Inbox'));
+
+// Stitch Layers also lives as a SIDEBAR button. The lasso "..." popup
+// in the Manta toolbar has limited visible space; with Sticker + our
+// Send to Mac + Recognize already there, the lasso version may scroll
+// off-screen and look "missing". The sidebar entry is always visible
+// — lasso state is preserved when the plugin view opens, so the user
+// can lasso → open sidebar → Stitch Layers and the picker still sees
+// the selection. The lasso-toolbar version below stays registered for
+// users who scroll to it. The two registrations need distinct ids;
+// App.tsx routes both to the same LayerStitch screen.
+regBtn(1, 'Stitch Layers', baseBtn(BUTTON_STITCH_LAYERS_SIDE, 'Stitch Layers'));
 
 // Lasso-toolbar buttons (type=2). The host's area-selection adapter
 // expects `editDataTypes` and `nameMap` — without either it throws.
