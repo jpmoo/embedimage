@@ -1,0 +1,9 @@
+Flask>=3.0
+mss>=9.0
+Pillow>=10.0
+pyobjc-framework-Quartz>=10.0
+
+# Optional — required only for the /birefnet endpoint (background removal).
+# Install separately when you want to use the Remove BG buttons:
+#   pip install torch torchvision transformers
+# These pull ~2 GB of model + deps so they're kept out of the default install.
