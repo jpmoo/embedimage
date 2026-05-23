@@ -27,6 +27,12 @@ type ImageProcessorNative = {
     bodyJson: string | null,
     timeoutMs: number,
   ) => Promise<{ status: number; body: string }>;
+  nativeHttpPostFile: (
+    url: string,
+    inputPath: string,
+    contentType: string,
+    timeoutMs: number,
+  ) => Promise<string>;
   cleanupCache: () => Promise<number>;
   getConfigValue: (key: string) => Promise<string | null>;
   setConfigValue: (key: string, value: string | null) => Promise<boolean>;
@@ -98,4 +104,16 @@ export async function lanJson<T = any>(
   const res = await lanHttp(method, url, body, timeoutMs);
   if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
   return JSON.parse(res.body) as T;
+}
+
+// POST a local file's bytes to a URL and save the binary response to a
+// new cache file. Returns the output file path.
+export async function lanPostFile(
+  url: string,
+  inputPath: string,
+  contentType: string = 'image/png',
+  timeoutMs: number = 60000,
+): Promise<string> {
+  if (!native) throw new Error('ImageProcessor native module missing');
+  return native.nativeHttpPostFile(url, inputPath, contentType, timeoutMs);
 }

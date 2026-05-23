@@ -79,6 +79,38 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
     // Cleartext-safe HTTP fetch used by JS for small JSON endpoints
     // (/status, /adjust). Returns {status:int, body:string}. Body is decoded
     // as UTF-8; for binary payloads use downloadAndProcess.
+    // POST the contents of `inputPath` as the request body to `url`, write
+    // the binary response to a temp file in the cache dir, and resolve
+    // with that path. Used for BiRefNet (PNG in, PNG out) where lanHttp
+    // would corrupt the response by decoding it as UTF-8 text.
+    @ReactMethod
+    fun nativeHttpPostFile(
+        url: String,
+        inputPath: String,
+        contentType: String,
+        timeoutMs: Int,
+        promise: Promise,
+    ) {
+        try {
+            val src = File(inputPath)
+            if (!src.exists()) {
+                promise.reject("E_HTTP_FILE", "input file does not exist: $inputPath")
+                return
+            }
+            val body = src.readBytes()
+            val (status, raw) = rawHttpRequest("POST", url, body, contentType, timeoutMs)
+            if (status !in 200..299) {
+                promise.reject("E_HTTP", "HTTP $status — ${String(raw, Charsets.UTF_8).take(200)}")
+                return
+            }
+            val outFile = File(reactApplicationContext.cacheDir, "bgr_${System.currentTimeMillis()}.png")
+            FileOutputStream(outFile).use { it.write(raw) }
+            promise.resolve(outFile.absolutePath)
+        } catch (e: Throwable) {
+            promise.reject("E_HTTP_FILE", e.message ?: e.toString(), e)
+        }
+    }
+
     @ReactMethod
     fun nativeHttp(
         method: String,

@@ -11,8 +11,11 @@ import {
 } from 'react-native';
 import { PluginManager, PluginNoteAPI } from 'sn-plugin-lib';
 import { AdjustmentPanel } from '../AdjustmentPanel';
-import { adjustmentsAreDefault, bakeFile } from '../imageProcessor';
-import { Adjustments, DEFAULT_ADJUSTMENTS, Entry } from '../types';
+import { StatusDot } from '../StatusDot';
+import { adjustmentsAreDefault, bakeFile, lanPostFile } from '../imageProcessor';
+import { baseUrl, loadStreamConfig } from '../storage';
+import { useConnStatus } from '../useConnStatus';
+import { Adjustments, DEFAULT_ADJUSTMENTS, DEFAULT_STREAM_CONFIG, Entry, StreamConfig } from '../types';
 
 const PREVIEW_MAX_DIM = 800;
 
@@ -32,6 +35,13 @@ export function PreviewScreen({
   const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>(entry.name);
+  const [bgRemovedPath, setBgRemovedPath] = useState<string | null>(null);
+  const [streamCfg, setStreamCfg] = useState<StreamConfig>(DEFAULT_STREAM_CONFIG);
+  const connStatus = useConnStatus(baseUrl(streamCfg));
+
+  useEffect(() => {
+    loadStreamConfig().then(setStreamCfg).catch(() => {});
+  }, []);
 
   // Debounced preview bake.
   useEffect(() => {
@@ -66,11 +76,14 @@ export function PreviewScreen({
     setStatus(`embedding ${entry.name}…`);
     try {
       const allDefault = adjustmentsAreDefault(adjustments);
-      const needsBake = !allDefault || !isPng(entry.name);
-      let pathToInsert = entry.path;
+      const sourcePath = bgRemovedPath ?? entry.path;
+      // Skip bake if no adjustments and the source is already a PNG (the
+      // BiRefNet output is PNG too, so this branch covers that as well).
+      const needsBake = !allDefault || (!bgRemovedPath && !isPng(entry.name));
+      let pathToInsert = sourcePath;
       if (needsBake) {
         try {
-          pathToInsert = await bakeFile(entry.path, adjustments, 0);
+          pathToInsert = await bakeFile(sourcePath, adjustments, 0);
         } catch (e: any) {
           setStatus(`process failed: ${e?.message ?? e}`);
           return;
@@ -91,9 +104,30 @@ export function PreviewScreen({
     } finally {
       setBusy(false);
     }
-  }, [entry, adjustments, busy]);
+  }, [entry, adjustments, busy, bgRemovedPath]);
 
-  const sourceUri = 'file://' + (previewPath ?? entry.path);
+  const onRemoveBg = useCallback(async () => {
+    if (busy) return;
+    const url = baseUrl(streamCfg);
+    if (!url) {
+      setStatus('no Mac server configured — set it in Settings');
+      return;
+    }
+    setBusy(true);
+    setStatus('removing background via BiRefNet (Mac side)…');
+    try {
+      const outPath = await lanPostFile(`${url}/birefnet?bg=white`, entry.path, 'image/png', 120000);
+      setBgRemovedPath(outPath);
+      setPreviewPath(outPath);
+      setStatus('background removed. Insert to embed.');
+    } catch (e: any) {
+      setStatus(`Remove BG failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, streamCfg, entry.path]);
+
+  const sourceUri = 'file://' + (previewPath ?? bgRemovedPath ?? entry.path);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -103,6 +137,7 @@ export function PreviewScreen({
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>{entry.name}</Text>
         {previewing ? <ActivityIndicator size="small" color="#000" /> : null}
+        <StatusDot status={connStatus} />
       </View>
 
       <Text style={styles.status} numberOfLines={1}>{status}</Text>
@@ -116,6 +151,13 @@ export function PreviewScreen({
       <View style={styles.actionRow}>
         <Pressable style={styles.actionBtn} onPress={onBack} disabled={busy}>
           <Text style={styles.btnTxt}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          style={styles.actionBtn}
+          onPress={onRemoveBg}
+          disabled={busy || !baseUrl(streamCfg)}
+        >
+          <Text style={styles.btnTxt}>Remove BG</Text>
         </Pressable>
         <Pressable
           style={[styles.actionBtn, styles.actionBtnPrimary]}

@@ -6,7 +6,8 @@ import { CaptureScreen } from './src/screens/Capture';
 import { PreviewScreen } from './src/screens/Preview';
 import { RefreshScreen } from './src/screens/Refresh';
 import { SettingsScreen } from './src/screens/Settings';
-import { loadStreamConfig } from './src/storage';
+import { SourcePicker } from './src/screens/SourcePicker';
+import { baseUrl, loadStreamConfig } from './src/storage';
 import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types';
 
 // Must match BUTTON_REFRESH in index.js.
@@ -72,6 +73,17 @@ export default function App(): React.JSX.Element {
         onConfigChange={setStreamConfig}
         onBack={goBrowser}
         onOpenSettings={() => setScreen('settings')}
+        onOpenSourcePicker={() => setScreen('sourcepicker')}
+      />
+    );
+  }
+
+  if (screen === 'sourcepicker') {
+    return (
+      <SourcePicker
+        baseUrl={baseUrl(streamConfig)}
+        onClose={() => setScreen('capture')}
+        onChanged={() => setScreen('capture')}
       />
     );
   }

@@ -15,6 +15,10 @@ export async function loadStreamConfig(): Promise<StreamConfig> {
       port: typeof parsed.port === 'number' ? parsed.port : DEFAULT_STREAM_CONFIG.port,
       intervalSec:
         typeof parsed.intervalSec === 'number' ? parsed.intervalSec : DEFAULT_STREAM_CONFIG.intervalSec,
+      resolutionMul:
+        typeof parsed.resolutionMul === 'number'
+          ? Math.max(0.1, Math.min(1.0, parsed.resolutionMul))
+          : DEFAULT_STREAM_CONFIG.resolutionMul,
     };
   } catch {
     return DEFAULT_STREAM_CONFIG;

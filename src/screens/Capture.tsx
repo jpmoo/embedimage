@@ -12,9 +12,11 @@ import {
 } from 'react-native';
 import { PluginManager } from 'sn-plugin-lib';
 import { AdjustmentPanel } from '../AdjustmentPanel';
-import { downloadAndBake, lanHttp, lanJson } from '../imageProcessor';
+import { StatusDot } from '../StatusDot';
+import { downloadAndBake, lanHttp, lanJson, lanPostFile } from '../imageProcessor';
 import { insertAndTrack, replaceInPlace } from '../embedTracker';
 import { baseUrl, saveStreamConfig } from '../storage';
+import { useConnStatus } from '../useConnStatus';
 import {
   Adjustments,
   DEFAULT_ADJUSTMENTS,
@@ -49,11 +51,13 @@ export function CaptureScreen({
   onConfigChange,
   onBack,
   onOpenSettings,
+  onOpenSourcePicker,
 }: {
   config: StreamConfig;
   onConfigChange: (cfg: StreamConfig) => void;
   onBack: () => void;
   onOpenSettings: () => void;
+  onOpenSourcePicker: () => void;
 }): React.JSX.Element {
   const [adjustments, setAdjustments] = useState<Adjustments>(DEFAULT_ADJUSTMENTS);
   const [capturing, setCapturing] = useState(false);
@@ -63,7 +67,9 @@ export function CaptureScreen({
   const [busy, setBusy] = useState(false);
   const [track, setTrack] = useState<EmbedTrack | null>(null);
   const [intervalSec, setIntervalSec] = useState<number>(config.intervalSec);
+  const [resolutionMul, setResolutionMul] = useState<number>(config.resolutionMul);
   const inFlight = useRef(false);
+  const connStatus = useConnStatus(baseUrl(config));
 
   const pushLog = useCallback((msg: string) => {
     setLogs((prev) => {
@@ -170,6 +176,54 @@ export function CaptureScreen({
     [intervalSec, config, onConfigChange],
   );
 
+  const changeResolutionMul = useCallback(
+    (delta: number) => {
+      const next = Math.round(clamp(resolutionMul + delta, 0.1, 1.0) * 10) / 10;
+      if (next === resolutionMul) return;
+      setResolutionMul(next);
+      const cfg = { ...config, resolutionMul: next };
+      onConfigChange(cfg);
+      saveStreamConfig(cfg).catch(() => {});
+      if (url) {
+        lanHttp('POST', `${url}/resolution`, { mul: next }, 2000).catch((e: any) =>
+          pushLog(`resolution push failed: ${e?.message ?? e}`),
+        );
+      }
+    },
+    [resolutionMul, config, onConfigChange, url, pushLog],
+  );
+
+  // Send the current resolution to the server when we first connect or
+  // when the URL changes. Also send when adjustments are pushed but the
+  // server hasn't been told yet.
+  useEffect(() => {
+    if (!url) return;
+    lanHttp('POST', `${url}/resolution`, { mul: resolutionMul }, 2000).catch(() => {});
+    // intentionally only on URL change — interactive changes go through
+    // changeResolutionMul above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
+  const onRemoveBg = useCallback(async () => {
+    if (busy || !framePath) return;
+    if (capturing) {
+      pushLog('pause first — Remove BG only works on a still frame');
+      return;
+    }
+    setBusy(true);
+    pushLog('removing background via BiRefNet…');
+    try {
+      const outPath = await lanPostFile(`${url}/birefnet?bg=white`, framePath, 'image/png', 120000);
+      setFramePath(outPath);
+      setLastFrameTs(Date.now());
+      pushLog('background removed (still frame). Insert or Replace to embed.');
+    } catch (e: any) {
+      pushLog(`Remove BG failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, framePath, capturing, url, pushLog]);
+
   const onInsert = useCallback(async () => {
     if (busy) return;
     setBusy(true);
@@ -258,6 +312,10 @@ export function CaptureScreen({
           <Text style={styles.btnTxt}>Back</Text>
         </Pressable>
         <Text style={styles.title}>Live Capture</Text>
+        <StatusDot status={connStatus} />
+        <Pressable style={styles.btn} onPress={onOpenSourcePicker} disabled={busy || !url}>
+          <Text style={styles.btnTxt}>Source</Text>
+        </Pressable>
         <Pressable style={styles.btn} onPress={onOpenSettings} disabled={busy}>
           <Text style={styles.btnTxt}>Settings</Text>
         </Pressable>
@@ -292,8 +350,12 @@ export function CaptureScreen({
         <Pressable style={styles.btn} onPress={() => fetchOnce()} disabled={busy || !url}>
           <Text style={styles.btnTxt}>Pull once</Text>
         </Pressable>
-        <Pressable style={styles.btn} onPress={onCheckStatus} disabled={busy || !url}>
-          <Text style={styles.btnTxt}>Status</Text>
+        <Pressable
+          style={styles.btn}
+          onPress={onRemoveBg}
+          disabled={busy || !framePath || capturing}
+        >
+          <Text style={[styles.btnTxt, capturing && styles.btnTxtMuted]}>Remove BG</Text>
         </Pressable>
         <View style={{ flex: 1 }} />
         <Pressable style={styles.btn} onPress={() => changeInterval(-INTERVAL_STEP)} disabled={busy}>
@@ -302,6 +364,21 @@ export function CaptureScreen({
         <Text style={styles.intervalLabel}>{intervalSec.toFixed(1)}s</Text>
         <Pressable style={styles.btn} onPress={() => changeInterval(+INTERVAL_STEP)} disabled={busy}>
           <Text style={styles.btnTxt}>+</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.controlBar}>
+        <Text style={styles.intervalLabel}>Res</Text>
+        <Pressable style={styles.btn} onPress={() => changeResolutionMul(-0.1)} disabled={busy}>
+          <Text style={styles.btnTxt}>−</Text>
+        </Pressable>
+        <Text style={styles.intervalLabel}>{Math.round(resolutionMul * 100)}%</Text>
+        <Pressable style={styles.btn} onPress={() => changeResolutionMul(+0.1)} disabled={busy}>
+          <Text style={styles.btnTxt}>+</Text>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        <Pressable style={styles.btn} onPress={onCheckStatus} disabled={busy || !url}>
+          <Text style={styles.btnTxt}>Status</Text>
         </Pressable>
       </View>
 
@@ -376,6 +453,7 @@ const styles = StyleSheet.create({
   btnActive: { backgroundColor: '#000' },
   btnTxt: { fontSize: 14, color: '#000' },
   btnTxtPrimary: { color: '#fff' },
+  btnTxtMuted: { color: '#999' },
   previewArea: {
     flex: 1, backgroundColor: '#fff', margin: 12,
     borderWidth: 1, borderColor: '#000',

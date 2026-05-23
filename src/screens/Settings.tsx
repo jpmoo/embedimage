@@ -26,6 +26,7 @@ export function SettingsScreen({
   const [host, setHost] = useState<string>(DEFAULT_STREAM_CONFIG.host);
   const [port, setPort] = useState<string>(String(DEFAULT_STREAM_CONFIG.port));
   const [intervalSec, setIntervalSec] = useState<string>(String(DEFAULT_STREAM_CONFIG.intervalSec));
+  const [resolutionMul, setResolutionMul] = useState<string>(String(DEFAULT_STREAM_CONFIG.resolutionMul));
   const [status, setStatus] = useState<string>('loading…');
   const [busy, setBusy] = useState(false);
 
@@ -35,6 +36,7 @@ export function SettingsScreen({
       setHost(cfg.host);
       setPort(String(cfg.port));
       setIntervalSec(String(cfg.intervalSec));
+      setResolutionMul(String(cfg.resolutionMul));
       setStatus(cfg.host ? `loaded: ${baseUrl(cfg)}` : 'no server configured');
     })();
   }, []);
@@ -56,7 +58,17 @@ export function SettingsScreen({
     try {
       const portNum = clamp(parseInt(port, 10) || DEFAULT_STREAM_CONFIG.port, 1, 65535);
       const intervalNum = clamp(parseFloat(intervalSec) || DEFAULT_STREAM_CONFIG.intervalSec, 0.2, 60);
-      const cfg: StreamConfig = { host: host.trim(), port: portNum, intervalSec: intervalNum };
+      const mulNum = clamp(
+        parseFloat(resolutionMul) || DEFAULT_STREAM_CONFIG.resolutionMul,
+        0.1,
+        1.0,
+      );
+      const cfg: StreamConfig = {
+        host: host.trim(),
+        port: portNum,
+        intervalSec: intervalNum,
+        resolutionMul: Math.round(mulNum * 10) / 10,
+      };
       await saveStreamConfig(cfg);
       setStatus(`saved: ${baseUrl(cfg)}`);
       onSaved(cfg);
@@ -65,7 +77,7 @@ export function SettingsScreen({
     } finally {
       setBusy(false);
     }
-  }, [host, port, intervalSec, onSaved]);
+  }, [host, port, intervalSec, resolutionMul, onSaved]);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -119,6 +131,21 @@ export function SettingsScreen({
             keyboardType="decimal-pad"
           />
           <Text style={styles.hint}>0.2 .. 60 seconds. 1.0 = 1 fps (recommended for e-ink).</Text>
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Resolution multiplier</Text>
+          <TextInput
+            style={styles.input}
+            value={resolutionMul}
+            onChangeText={setResolutionMul}
+            placeholder="1.0"
+            keyboardType="decimal-pad"
+          />
+          <Text style={styles.hint}>
+            0.1 .. 1.0. Mac downscales each frame by this factor before sending.
+            Lower = less bandwidth + faster Mac → Manta round-trip.
+          </Text>
         </View>
 
         <View style={styles.row}>

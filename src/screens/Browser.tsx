@@ -10,7 +10,11 @@ import {
   View,
 } from 'react-native';
 import { FileUtils, PluginManager, RattaFileSelector } from 'sn-plugin-lib';
-import type { Entry, EntryKind, SortKey } from '../types';
+import { StatusDot } from '../StatusDot';
+import { baseUrl, loadStreamConfig } from '../storage';
+import { useConnStatus } from '../useConnStatus';
+import type { Entry, EntryKind, SortKey, StreamConfig } from '../types';
+import { DEFAULT_STREAM_CONFIG } from '../types';
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 const INTERNAL_ROOT = '/storage/emulated/0';
@@ -83,6 +87,11 @@ export function BrowserScreen({
   const [sort, setSort] = useState<SortKey>('date_desc');
   const [columns, setColumns] = useState<number>(DEFAULT_COLUMNS);
   const [status, setStatus] = useState<string>('starting…');
+  const [streamCfg, setStreamCfg] = useState<StreamConfig>(DEFAULT_STREAM_CONFIG);
+  const connStatus = useConnStatus(baseUrl(streamCfg));
+  useEffect(() => {
+    loadStreamConfig().then(setStreamCfg).catch(() => {});
+  }, []);
 
   const load = useCallback(async (dir: string) => {
     setStatus(`listing ${dir}`);
@@ -203,6 +212,7 @@ export function BrowserScreen({
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>Embed Image</Text>
+        <StatusDot status={connStatus} />
         <Pressable style={styles.btn} onPress={onOpenCapture}>
           <Text style={styles.btnTxt}>Live…</Text>
         </Pressable>

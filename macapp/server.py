@@ -6,15 +6,22 @@ configurable interval and stashes the latest PNG bytes in memory.
 
 Endpoints
 ---------
-GET  /status                  -> JSON {running, source, interval_sec, ip, ...}
-GET  /frame                   -> PNG bytes of the latest captured frame
-POST /start                   -> begin capture loop
-POST /stop                    -> pause capture loop
-POST /source  {source, ...}   -> change capture source (full screen, region, window)
-POST /interval {interval_sec} -> change capture interval
+GET  /status                   -> JSON {running, source, interval_sec, ip, ...}
+GET  /frame                    -> PNG bytes of the latest captured frame
+POST /start                    -> begin capture loop
+POST /stop                     -> pause capture loop
+POST /source  {source, ...}    -> change capture source (full screen, region, window)
+POST /interval {interval_sec}  -> change capture interval
 POST /adjust  {fade, brightness, contrast, gamma}
-                              -> apply tone adjustments to served frames
-GET  /windows                 -> JSON list of visible windows from Quartz
+                               -> apply tone adjustments to served frames
+POST /resolution {mul}         -> downscale factor (0.1..1.0) applied to frames
+GET  /windows                  -> JSON list of visible windows from Quartz
+GET  /preview-shot?max=600     -> one-off PNG screenshot of the primary
+                                  monitor for the Manta-side region picker
+POST /birefnet                 -> request body is PNG image bytes; response
+                                  is PNG with background removed (composited
+                                  onto white). Requires `torch` and
+                                  `transformers` to be installed.
 """
 from __future__ import annotations
 
@@ -88,6 +95,7 @@ class CaptureState:
     region: Optional[dict] = None  # {x, y, w, h}
     window_id: Optional[int] = None
     interval_sec: float = 1.0
+    resolution_mul: float = 1.0  # downscale factor applied to outgoing frames
     adjust: dict = field(default_factory=lambda: dict(_DEFAULT_ADJUST))
 
     last_frame: Optional[bytes] = None
@@ -195,6 +203,11 @@ def _capture_once(sct: mss.mss) -> Optional[bytes]:
 
     shot = sct.grab(target)
     pil = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    mul = max(0.05, min(1.0, STATE.resolution_mul))
+    if mul < 0.999:
+        new_w = max(1, int(round(pil.width * mul)))
+        new_h = max(1, int(round(pil.height * mul)))
+        pil = pil.resize((new_w, new_h), Image.LANCZOS)
     pil = _apply_adjust(pil, dict(STATE.adjust))
     buf = io.BytesIO()
     pil.save(buf, format="PNG", optimize=False)
@@ -232,8 +245,21 @@ app = Flask(__name__)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
+def _primary_monitor() -> dict:
+    with mss.mss() as sct:
+        monitors = sct.monitors
+        mon = monitors[1] if len(monitors) > 1 else monitors[0]
+        return {
+            "left": int(mon["left"]),
+            "top": int(mon["top"]),
+            "width": int(mon["width"]),
+            "height": int(mon["height"]),
+        }
+
+
 @app.route("/status")
 def status():
+    mon = _primary_monitor()
     with STATE.lock:
         return jsonify(
             {
@@ -243,12 +269,14 @@ def status():
                 "region": STATE.region,
                 "window_id": STATE.window_id,
                 "interval_sec": STATE.interval_sec,
+                "resolution_mul": STATE.resolution_mul,
                 "adjust": dict(STATE.adjust),
                 "frame_count": STATE.frame_count,
                 "has_frame": STATE.last_frame is not None,
                 "last_frame_ts": STATE.last_frame_ts,
                 "last_error": STATE.last_error,
                 "ip": get_local_ip(),
+                "monitor": mon,
             }
         )
 
@@ -325,9 +353,159 @@ def set_adjust():
     return jsonify({"ok": True, "adjust": new})
 
 
+@app.route("/resolution", methods=["POST"])
+def set_resolution():
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        v = float(body.get("mul", body.get("resolution_mul", 1.0)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid resolution"}), 400
+    STATE.resolution_mul = max(0.1, min(1.0, v))
+    log(f"resolution -> {STATE.resolution_mul:.2f}")
+    return jsonify({"ok": True, "resolution_mul": STATE.resolution_mul})
+
+
 @app.route("/windows")
 def windows():
     return jsonify(list_windows())
+
+
+@app.route("/preview-shot")
+def preview_shot():
+    """Single screenshot for the Manta region picker. Always full primary
+    monitor (no adjustments, no resolution mul applied), downscaled to a
+    max dimension. Response: PNG bytes.
+
+    Headers:
+        X-Mon-Left / X-Mon-Top / X-Mon-Width / X-Mon-Height  (mac pixels)
+        X-Scale                                              (preview / mac)
+
+    Query:
+        max  preview max dimension (default 600)
+    """
+    try:
+        max_dim = int(request.args.get("max", "600"))
+    except (TypeError, ValueError):
+        max_dim = 600
+    max_dim = max(160, min(2000, max_dim))
+
+    with mss.mss() as sct:
+        monitors = sct.monitors
+        mon = monitors[1] if len(monitors) > 1 else monitors[0]
+        shot = sct.grab(mon)
+    pil = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    long_side = max(pil.width, pil.height)
+    scale = max_dim / long_side if long_side > max_dim else 1.0
+    if scale < 0.999:
+        pil = pil.resize(
+            (max(1, int(pil.width * scale)), max(1, int(pil.height * scale))),
+            Image.LANCZOS,
+        )
+    buf = io.BytesIO()
+    pil.save(buf, format="PNG", optimize=False)
+    headers = {
+        "Content-Type": "image/png",
+        "X-Mon-Left": str(int(mon["left"])),
+        "X-Mon-Top": str(int(mon["top"])),
+        "X-Mon-Width": str(int(mon["width"])),
+        "X-Mon-Height": str(int(mon["height"])),
+        "X-Scale": f"{scale:.6f}",
+    }
+    return buf.getvalue(), 200, headers
+
+
+# ---- BiRefNet background removal (lazy-loaded) ----
+
+_BIREFNET = None  # cached {model, processor, device}
+_BIREFNET_LOCK = threading.Lock()
+
+
+def _load_birefnet():
+    """Import torch/transformers lazily and cache the model. Returns the
+    cached dict on success or raises with a friendly message."""
+    global _BIREFNET
+    with _BIREFNET_LOCK:
+        if _BIREFNET is not None:
+            return _BIREFNET
+        try:
+            import torch  # type: ignore
+            from transformers import AutoModelForImageSegmentation  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                "BiRefNet needs torch+transformers. Install with:\n"
+                "  pip install torch torchvision transformers"
+            ) from e
+        log("loading BiRefNet (first call only — may take a while)…")
+        model = AutoModelForImageSegmentation.from_pretrained(
+            "ZhengPeng7/BiRefNet", trust_remote_code=True
+        )
+        device = (
+            "mps" if torch.backends.mps.is_available()
+            else "cuda" if torch.cuda.is_available()
+            else "cpu"
+        )
+        model.to(device).eval()
+        log(f"BiRefNet ready on {device}")
+        _BIREFNET = {"model": model, "device": device, "torch": torch}
+        return _BIREFNET
+
+
+def _birefnet_remove(img: Image.Image, bg: str) -> Image.Image:
+    """Run BiRefNet; composite onto white (bg='white') or keep alpha
+    (bg='transparent')."""
+    state = _load_birefnet()
+    torch = state["torch"]
+    model = state["model"]
+    device = state["device"]
+    from torchvision import transforms  # local import; torchvision came with torch
+
+    tfm = transforms.Compose([
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    rgb = img.convert("RGB")
+    inp = tfm(rgb).unsqueeze(0).to(device)
+    with torch.no_grad():
+        preds = model(inp)[-1].sigmoid().cpu()
+    mask = preds[0].squeeze()
+    from PIL import Image as PI
+    mask_pil = transforms.ToPILImage()(mask).resize(rgb.size, PI.BILINEAR)
+    out = rgb.copy()
+    out.putalpha(mask_pil)
+    if bg == "transparent":
+        return out
+    flat = Image.new("RGB", out.size, (255, 255, 255))
+    flat.paste(out, mask=out.split()[3])
+    return flat
+
+
+@app.route("/birefnet", methods=["POST"])
+def birefnet():
+    """Body: raw image bytes (PNG/JPEG/etc).
+    Query: bg=white (default) | transparent."""
+    bg = request.args.get("bg", "white").lower()
+    if bg not in ("white", "transparent"):
+        bg = "white"
+    raw = request.get_data(cache=False)
+    if not raw:
+        return jsonify({"error": "no image body"}), 400
+    try:
+        src = Image.open(io.BytesIO(raw))
+        src.load()
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"decode failed: {e}"}), 400
+    try:
+        out = _birefnet_remove(src, bg)
+    except RuntimeError as e:
+        log(f"birefnet not available: {e}")
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:  # noqa: BLE001
+        log(f"birefnet error: {e}")
+        return jsonify({"error": f"birefnet failed: {e}"}), 500
+    buf = io.BytesIO()
+    out.save(buf, format="PNG", optimize=False)
+    return buf.getvalue(), 200, {"Content-Type": "image/png"}
 
 
 def run_server(host: str, port: int) -> None:
