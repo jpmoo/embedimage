@@ -478,6 +478,40 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         return Bitmap.createBitmap(src, l, t, w, h)
     }
 
+    // Composite the input PNG (which may have alpha) over a solid color
+    // background. Used by the lasso → stitch-layers flow when the user
+    // wants a flat (non-transparent) output.
+    @ReactMethod
+    fun flattenOntoBg(
+        inputPath: String, outPath: String,
+        r: Int, g: Int, b: Int,
+        promise: Promise,
+    ) {
+        var src: Bitmap? = null
+        var out: Bitmap? = null
+        try {
+            src = BitmapFactory.decodeFile(inputPath)
+                ?: throw RuntimeException("decode failed: $inputPath")
+            out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawColor(android.graphics.Color.rgb(
+                r.coerceIn(0, 255), g.coerceIn(0, 255), b.coerceIn(0, 255),
+            ))
+            canvas.drawBitmap(src, 0f, 0f, null)
+            val file = File(outPath)
+            file.parentFile?.mkdirs()
+            FileOutputStream(file).use { stream ->
+                out.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            }
+            promise.resolve(outPath)
+        } catch (e: Throwable) {
+            promise.reject("E_FLATTEN", e.message ?: e.toString(), e)
+        } finally {
+            src?.recycle()
+            out?.recycle()
+        }
+    }
+
     @ReactMethod
     fun setConfigValue(key: String, value: String?, promise: Promise) {
         try {

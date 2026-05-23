@@ -10,7 +10,8 @@ export type Screen =
   | 'sourcepicker'
   | 'dropinbox'
   | 'recognizelasso'
-  | 'stitch';
+  | 'stitch'
+  | 'layerstitch';
 
 export type DitherMode = 'none' | 'fs1' | 'fs4' | 'atkinson';
 

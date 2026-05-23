@@ -43,6 +43,9 @@ type ImageProcessorNative = {
     topLayerIndex: number,
     outPath: string,
   ) => Promise<string>;
+  flattenOntoBg: (
+    inputPath: string, outPath: string, r: number, g: number, b: number,
+  ) => Promise<string>;
   cleanupCache: () => Promise<number>;
   getConfigValue: (key: string) => Promise<string | null>;
   setConfigValue: (key: string, value: string | null) => Promise<boolean>;
@@ -132,6 +135,14 @@ export async function lanPostFile(
 export type ImageCrop = { cropTop: number; cropBottom: number; cropLeft: number; cropRight: number };
 export type StitchImage = { path: string; width: number; height: number; crop: ImageCrop };
 export type StitchParams = { direction: 'vertical' | 'horizontal'; overlap: number; topLayerIndex: number };
+
+// Flatten a (potentially transparent) PNG over a solid background color.
+export async function flattenOntoBg(
+  inputPath: string, outPath: string, rgb: { r: number; g: number; b: number },
+): Promise<string> {
+  if (!native) throw new Error('ImageProcessor native module missing');
+  return native.flattenOntoBg(inputPath, outPath, rgb.r, rgb.g, rgb.b);
+}
 
 // Composes two cropped images into one PNG. Returns the output path.
 export async function composeStitch(

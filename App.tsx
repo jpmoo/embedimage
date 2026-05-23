@@ -5,6 +5,7 @@ import { BrowserScreen } from './src/screens/Browser';
 import { CaptureScreen } from './src/screens/Capture';
 import { DropInbox } from './src/screens/DropInbox';
 import { PreviewScreen } from './src/screens/Preview';
+import { LayerStitch } from './src/screens/LayerStitch';
 import { RecognizeLasso } from './src/screens/RecognizeLasso';
 import { RefreshScreen } from './src/screens/Refresh';
 import { SettingsScreen } from './src/screens/Settings';
@@ -18,6 +19,7 @@ import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types'
 const BUTTON_REFRESH = 2;
 const BUTTON_DROP = 3;
 const BUTTON_LASSO_RECOGNIZE = 5;
+const BUTTON_LASSO_STITCH_LAYERS = 6;
 
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('browser');
@@ -37,6 +39,7 @@ export default function App(): React.JSX.Element {
         if (msg?.id === BUTTON_REFRESH) setScreen('refresh');
         else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
         else if (msg?.id === BUTTON_LASSO_RECOGNIZE) setScreen('recognizelasso');
+        else if (msg?.id === BUTTON_LASSO_STITCH_LAYERS) setScreen('layerstitch');
       },
     });
     return () => {
@@ -64,6 +67,10 @@ export default function App(): React.JSX.Element {
 
   if (screen === 'recognizelasso') {
     return <RecognizeLasso />;
+  }
+
+  if (screen === 'layerstitch') {
+    return <LayerStitch onClose={goBrowser} />;
   }
 
   if (screen === 'stitch' && stitchSession) {
