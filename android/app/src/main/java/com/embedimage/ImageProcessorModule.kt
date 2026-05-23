@@ -368,6 +368,21 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // Inkling-style file logger. Creates parent dirs on demand; appends
+    // UTF-8 with a trailing newline. Best-effort: callers should swallow
+    // failures (e.g. when /sdcard isn't writable on a locked device).
+    @ReactMethod
+    fun appendFile(path: String, text: String, promise: Promise) {
+        try {
+            val f = File(path)
+            f.parentFile?.mkdirs()
+            FileOutputStream(f, true).use { it.write((text + "\n").toByteArray(Charsets.UTF_8)) }
+            promise.resolve(true)
+        } catch (e: Throwable) {
+            promise.reject("E_APPEND", e.message ?: e.toString(), e)
+        }
+    }
+
     @ReactMethod
     fun setConfigValue(key: String, value: String?, promise: Promise) {
         try {

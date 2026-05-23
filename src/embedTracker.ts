@@ -1,6 +1,7 @@
 import { PluginCommAPI, PluginFileAPI, PluginNoteAPI } from 'sn-plugin-lib';
 import { saveEmbedTrack } from './storage';
 import { EmbedTrack } from './types';
+import { FileLogger } from './util/FileLogger';
 
 // Tracks the most recently embedded Picture element so the live-capture
 // flow can replace it in place when a new frame comes in.
@@ -94,7 +95,7 @@ async function refreshTrackAndRaw(
 
 export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Promise<EmbedTrack | null> {
   const { track: fresh, raw } = await refreshTrackAndRaw(track);
-  console.log('[embedimage] replaceInPlace start', {
+  FileLogger.raw('[embedimage] replaceInPlace start', {
     notePath: fresh.notePath, page: fresh.page,
     numInPage: fresh.numInPage, layerNum: fresh.layerNum,
     uuid: fresh.uuid, rect: fresh.rect, newPngPath,
@@ -131,7 +132,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
       },
     };
   }
-  console.log('[embedimage] replaceInPlace newElement keys:', Object.keys(newElement));
+  FileLogger.raw('[embedimage] replaceInPlace newElement keys:', Object.keys(newElement));
 
   let insertOk = false;
   let insertErr: any = null;
@@ -139,7 +140,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     const ins: any = await PluginFileAPI.insertElements(
       fresh.notePath, fresh.page, [newElement],
     );
-    console.log('[embedimage] insertElements ->', JSON.stringify(ins));
+    FileLogger.raw('[embedimage] insertElements ->', JSON.stringify(ins));
     if (ins && ins.success !== false) {
       insertOk = true;
     } else {
@@ -147,7 +148,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     }
   } catch (e: any) {
     insertErr = e?.message ?? String(e);
-    console.log('[embedimage] insertElements threw:', insertErr);
+    FileLogger.raw('[embedimage] insertElements threw:', insertErr);
   }
 
   let movedTo: EmbedTrack | null = null;
@@ -157,9 +158,9 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     // fresh.rect. modifyElements doesn't re-load a picture's bitmap,
     // but it *does* honor rect updates, so this gives us refresh-in-
     // place even when insertElements rejects our payload shape.
-    console.log('[embedimage] insertElements failed (', insertErr, ') — trying insertImage + move');
+    FileLogger.raw('[embedimage] insertElements failed (', insertErr, ') — trying insertImage + move');
     const img: any = await PluginNoteAPI.insertImage(newPngPath);
-    console.log('[embedimage] insertImage ->', JSON.stringify(img));
+    FileLogger.raw('[embedimage] insertImage ->', JSON.stringify(img));
     if (!img || img.success === false) {
       throw new Error(`insert failed (original embed kept): ${img?.error?.message ?? insertErr ?? 'unknown'}`);
     }
@@ -168,7 +169,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     try {
       const lastRes: any = await PluginFileAPI.getLastElement();
       const newEl = lastRes?.result ?? lastRes;
-      console.log('[embedimage] insertImage placed element:', JSON.stringify(newEl)?.slice(0, 300));
+      FileLogger.raw('[embedimage] insertImage placed element:', JSON.stringify(newEl)?.slice(0, 300));
       if (newEl?.uuid && typeof newEl?.numInPage === 'number') {
         const moveEl: any = {
           ...newEl,
@@ -177,11 +178,11 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
         const moveRes: any = await PluginFileAPI.modifyElements(
           fresh.notePath, fresh.page, [moveEl],
         );
-        console.log('[embedimage] modifyElements (move) ->', JSON.stringify(moveRes));
+        FileLogger.raw('[embedimage] modifyElements (move) ->', JSON.stringify(moveRes));
         movedTo = fromElement(fresh.notePath, fresh.page, newEl);
       }
     } catch (e: any) {
-      console.log('[embedimage] move-after-insertImage threw:', e?.message ?? e);
+      FileLogger.raw('[embedimage] move-after-insertImage threw:', e?.message ?? e);
     }
   }
 
@@ -189,16 +190,16 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     const del: any = await PluginFileAPI.deleteElements(
       fresh.notePath, fresh.page, [fresh.numInPage],
     );
-    console.log('[embedimage] deleteElements ->', JSON.stringify(del));
+    FileLogger.raw('[embedimage] deleteElements ->', JSON.stringify(del));
   } catch (e: any) {
-    console.log('[embedimage] deleteElements threw:', e?.message ?? e);
+    FileLogger.raw('[embedimage] deleteElements threw:', e?.message ?? e);
     // Non-fatal: user has two pictures, better than zero.
   }
 
   try {
     await PluginNoteAPI.saveCurrentNote();
   } catch (e: any) {
-    console.log('[embedimage] saveCurrentNote threw:', e?.message ?? e);
+    FileLogger.raw('[embedimage] saveCurrentNote threw:', e?.message ?? e);
   }
 
   let newTrack: EmbedTrack | null = movedTo;
@@ -206,10 +207,10 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     try {
       const lastRes: any = await PluginFileAPI.getLastElement();
       const el = lastRes?.result ?? lastRes;
-      console.log('[embedimage] getLastElement after replace ->', JSON.stringify(el)?.slice(0, 400));
+      FileLogger.raw('[embedimage] getLastElement after replace ->', JSON.stringify(el)?.slice(0, 400));
       newTrack = fromElement(fresh.notePath, fresh.page, el);
     } catch (e: any) {
-      console.log('[embedimage] getLastElement threw:', e?.message ?? e);
+      FileLogger.raw('[embedimage] getLastElement threw:', e?.message ?? e);
       newTrack = null;
     }
   }

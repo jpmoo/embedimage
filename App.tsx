@@ -5,6 +5,7 @@ import { BrowserScreen } from './src/screens/Browser';
 import { CaptureScreen } from './src/screens/Capture';
 import { DropInbox } from './src/screens/DropInbox';
 import { PreviewScreen } from './src/screens/Preview';
+import { RecognizeLasso } from './src/screens/RecognizeLasso';
 import { RefreshScreen } from './src/screens/Refresh';
 import { SendLasso } from './src/screens/SendLasso';
 import { SettingsScreen } from './src/screens/Settings';
@@ -16,6 +17,7 @@ import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types'
 const BUTTON_REFRESH = 2;
 const BUTTON_DROP = 3;
 const BUTTON_LASSO_SEND = 4;
+const BUTTON_LASSO_RECOGNIZE = 5;
 
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('browser');
@@ -34,6 +36,7 @@ export default function App(): React.JSX.Element {
         if (msg?.id === BUTTON_REFRESH) setScreen('refresh');
         else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
         else if (msg?.id === BUTTON_LASSO_SEND) setScreen('sendlasso');
+        else if (msg?.id === BUTTON_LASSO_RECOGNIZE) setScreen('recognizelasso');
       },
     });
     return () => {
@@ -61,6 +64,10 @@ export default function App(): React.JSX.Element {
 
   if (screen === 'sendlasso') {
     return <SendLasso onClose={goBrowser} />;
+  }
+
+  if (screen === 'recognizelasso') {
+    return <RecognizeLasso />;
   }
 
   if (screen === 'preview' && selectedEntry) {

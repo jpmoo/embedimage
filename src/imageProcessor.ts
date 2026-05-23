@@ -33,6 +33,7 @@ type ImageProcessorNative = {
     contentType: string,
     timeoutMs: number,
   ) => Promise<string>;
+  appendFile: (path: string, text: string) => Promise<boolean>;
   cleanupCache: () => Promise<number>;
   getConfigValue: (key: string) => Promise<string | null>;
   setConfigValue: (key: string, value: string | null) => Promise<boolean>;

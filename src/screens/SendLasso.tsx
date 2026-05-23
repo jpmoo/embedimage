@@ -11,7 +11,8 @@ import { PluginCommAPI, PluginFileAPI, PluginManager } from 'sn-plugin-lib';
 import { lanPostFile } from '../imageProcessor';
 import { baseUrl, loadStreamConfig } from '../storage';
 import { theme } from '../ui/theme';
-import { StatusBar, TitleBar, Win95Button, Win95Frame, Win95InsetPanel } from '../ui/Win95';
+import { TitleBar, Win95Button, Win95Frame, Win95InsetPanel } from '../ui/Win95';
+import { FileLogger } from '../util/FileLogger';
 
 // Headless-ish: triggered by the "Send Lasso to Mac" sidebar button.
 // Generates a PNG of the currently-lassoed elements via the SDK, POSTs
@@ -36,11 +37,11 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
 
     (async () => {
       try {
-        console.log('[embedimage] SendLasso start');
+        FileLogger.raw('[embedimage] SendLasso start');
         setStatus('Loading config…');
         const cfg = await loadStreamConfig();
         const url = baseUrl(cfg);
-        console.log('[embedimage] SendLasso url=', url);
+        FileLogger.raw('[embedimage] SendLasso url=', url);
         if (!url) {
           setStatus('No Mac server set. Settings → Mac Capture Server.');
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
@@ -57,7 +58,7 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         const pgRes: any = await PluginCommAPI.getCurrentPageNum();
         const notePath = fpRes?.result ?? fpRes?.filePath ?? fpRes;
         const page = pgRes?.result ?? pgRes?.pageNum ?? pgRes;
-        console.log('[embedimage] SendLasso ctx notePath=', notePath, 'page=', page);
+        FileLogger.raw('[embedimage] SendLasso ctx notePath=', notePath, 'page=', page);
         if (typeof notePath !== 'string' || typeof page !== 'number') {
           setStatus('Could not get current note/page.');
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
@@ -68,18 +69,18 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         try {
           const lr: any = await PluginCommAPI.getLassoRect();
           if (lr?.success !== false && lr?.result) lassoRect = lr.result;
-          console.log('[embedimage] SendLasso getLassoRect ->', JSON.stringify(lassoRect));
+          FileLogger.raw('[embedimage] SendLasso getLassoRect ->', JSON.stringify(lassoRect));
         } catch (e: any) {
-          console.log('[embedimage] SendLasso getLassoRect threw:', e?.message ?? e);
+          FileLogger.raw('[embedimage] SendLasso getLassoRect threw:', e?.message ?? e);
         }
 
         setStatus('Rendering page to PNG…');
         const pngPath = `/data/user/0/com.ratta.supernote.pluginhost/cache/page_${Date.now()}.png`;
-        console.log('[embedimage] SendLasso generateNotePng ->', pngPath);
+        FileLogger.raw('[embedimage] SendLasso generateNotePng ->', pngPath);
         const gen: any = await PluginFileAPI.generateNotePng({
           notePath, page, times: 1, pngPath, type: 1, // 1 = white background
         });
-        console.log('[embedimage] SendLasso generateNotePng returned:', JSON.stringify(gen));
+        FileLogger.raw('[embedimage] SendLasso generateNotePng returned:', JSON.stringify(gen));
         if (!gen || gen.success === false) {
           setStatus(`Render failed: ${gen?.error?.message ?? 'unknown'}`);
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3500);
@@ -93,15 +94,15 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
         const qs = lassoRect
           ? `?name=${encodeURIComponent(name)}&cropL=${lassoRect.left}&cropT=${lassoRect.top}&cropR=${lassoRect.right}&cropB=${lassoRect.bottom}`
           : `?name=${encodeURIComponent(name)}`;
-        console.log('[embedimage] SendLasso POST', `${url}/sketch${qs}`);
+        FileLogger.raw('[embedimage] SendLasso POST', `${url}/sketch${qs}`);
         const out = await lanPostFile(`${url}/sketch${qs}`, pngPath, 'image/png', 30000);
-        console.log('[embedimage] SendLasso upload ok, response saved at', out);
+        FileLogger.raw('[embedimage] SendLasso upload ok, response saved at', out);
         if (cancelled) return;
         setStatus(`Sent to Mac as ${name}`);
         setDone(true);
         setTimeout(() => PluginManager.closePluginView().catch(() => {}), 1500);
       } catch (e: any) {
-        console.log('[embedimage] SendLasso outer threw:', e?.message ?? e);
+        FileLogger.raw('[embedimage] SendLasso outer threw:', e?.message ?? e);
         if (cancelled) return;
         setStatus(`Failed: ${e?.message ?? e}`);
         setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);

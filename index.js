@@ -12,7 +12,8 @@ PluginManager.init();
 export const BUTTON_MAIN = 1;
 export const BUTTON_REFRESH = 2;
 export const BUTTON_DROP = 3;
-export const BUTTON_LASSO_SEND = 4; // lasso-toolbar button (type=2)
+export const BUTTON_LASSO_SEND = 4;        // lasso toolbar — ship to Mac
+export const BUTTON_LASSO_RECOGNIZE = 5;   // lasso toolbar — OCR -> insert text
 
 const ICON = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 
@@ -57,6 +58,15 @@ PluginManager.registerButton(2, ['NOTE'], {
   ...baseBtn(BUTTON_LASSO_SEND, 'Send to Mac'),
   editDataTypes: [0, 1, 2, 3, 4, 5],
 }).catch((e) => console.log('[embedimage] lasso button register skipped:', e));
+
+// Blended-in Inkling feature: lasso some handwriting, tap "Recognize",
+// the plugin OCRs the strokes via PluginCommAPI.recognizeElements and
+// drops the typed text back into the note. editDataTypes restricted
+// to strokes/text (no point on pure pictures).
+PluginManager.registerButton(2, ['NOTE'], {
+  ...baseBtn(BUTTON_LASSO_RECOGNIZE, 'Recognize'),
+  editDataTypes: [0, 1, 3],
+}).catch((e) => console.log('[embedimage] recognize button register skipped:', e));
 
 PluginManager.registerButtonListener({
   onButtonPress: (_msg) => {

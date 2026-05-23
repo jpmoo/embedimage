@@ -9,7 +9,8 @@ export type Screen =
   | 'refresh'
   | 'sourcepicker'
   | 'dropinbox'
-  | 'sendlasso';
+  | 'sendlasso'
+  | 'recognizelasso';
 
 export type DitherMode = 'none' | 'fs1' | 'fs4' | 'atkinson';
 
