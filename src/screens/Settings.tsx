@@ -12,7 +12,7 @@ import { baseUrl, loadStreamConfig, saveStreamConfig } from '../storage';
 import { lanJson } from '../imageProcessor';
 import { theme } from '../ui/theme';
 import { StatusBar, TitleBar, Win95Button, Win95InsetPanel } from '../ui/Win95';
-import { DEFAULT_STREAM_CONFIG, StreamConfig } from '../types';
+import { DEFAULT_STREAM_CONFIG, LassoFormat, StreamConfig } from '../types';
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -29,6 +29,7 @@ export function SettingsScreen({
   const [port, setPort] = useState<string>(String(DEFAULT_STREAM_CONFIG.port));
   const [intervalSec, setIntervalSec] = useState<string>(String(DEFAULT_STREAM_CONFIG.intervalSec));
   const [resolutionMul, setResolutionMul] = useState<string>(String(DEFAULT_STREAM_CONFIG.resolutionMul));
+  const [lassoFormat, setLassoFormat] = useState<LassoFormat>(DEFAULT_STREAM_CONFIG.lassoFormat);
   const [status, setStatus] = useState<string>('loading…');
   const [busy, setBusy] = useState(false);
 
@@ -39,6 +40,7 @@ export function SettingsScreen({
       setPort(String(cfg.port));
       setIntervalSec(String(cfg.intervalSec));
       setResolutionMul(String(cfg.resolutionMul));
+      setLassoFormat(cfg.lassoFormat);
       setStatus(cfg.host ? `loaded: ${baseUrl(cfg)}` : 'no server configured');
     })();
   }, []);
@@ -70,6 +72,7 @@ export function SettingsScreen({
         port: portNum,
         intervalSec: intervalNum,
         resolutionMul: Math.round(mulNum * 10) / 10,
+        lassoFormat,
       };
       await saveStreamConfig(cfg);
       setStatus(`saved: ${baseUrl(cfg)}`);
@@ -79,7 +82,7 @@ export function SettingsScreen({
     } finally {
       setBusy(false);
     }
-  }, [host, port, intervalSec, resolutionMul, onSaved]);
+  }, [host, port, intervalSec, resolutionMul, lassoFormat, onSaved]);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -142,6 +145,30 @@ export function SettingsScreen({
             </Text>
           </Field>
 
+          <View style={styles.field}>
+            <Text style={styles.label}>Lasso → Mac format</Text>
+            <View style={styles.formatRow}>
+              <Win95Button
+                small
+                active={lassoFormat === 'png'}
+                onPress={() => setLassoFormat('png')}
+              >
+                PNG
+              </Win95Button>
+              <Win95Button
+                small
+                active={lassoFormat === 'jpg'}
+                onPress={() => setLassoFormat('jpg')}
+              >
+                JPEG
+              </Win95Button>
+            </View>
+            <Text style={styles.hint}>
+              File format the Mac will save your "Send to Mac" exports as.
+              PNG keeps transparency; JPEG is smaller.
+            </Text>
+          </View>
+
           <View style={styles.row}>
             <Win95Button onPress={onTest} disabled={busy || !host}>Test connection</Win95Button>
             <View style={{ flex: 1 }} />
@@ -184,6 +211,7 @@ const styles = StyleSheet.create({
     fontSize: 16, color: theme.text,
   },
   row: { flexDirection: 'row', gap: 8, marginTop: 8, alignItems: 'center' },
+  formatRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(192,192,192,0.6)',

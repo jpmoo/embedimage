@@ -671,7 +671,22 @@ def sketch():
     except ValueError:
         cl = ct = cr = cb = None
 
+    # Optional output format. The Manta always uploads PNG bytes; if the
+    # user picked JPEG in Settings, we re-encode here.
+    fmt_q = (request.args.get("format", "") or "").lower().strip()
+    fmt: str
+    if fmt_q in ("jpg", "jpeg"):
+        fmt = "JPEG"
+    elif fmt_q == "png":
+        fmt = "PNG"
+    elif name.lower().endswith((".jpg", ".jpeg")):
+        fmt = "JPEG"
+    else:
+        fmt = "PNG"
+
     out_bytes = raw
+    needs_reencode = (fmt == "JPEG")
+
     if cl is not None and ct is not None and cr is not None and cb is not None and cr > cl and cb > ct:
         try:
             img = Image.open(io.BytesIO(raw))
@@ -684,16 +699,35 @@ def sketch():
             if cr_c > cl_c and cb_c > ct_c:
                 cropped = img.crop((cl_c, ct_c, cr_c, cb_c))
                 buf = io.BytesIO()
-                cropped.save(buf, format="PNG", optimize=False)
+                if fmt == "JPEG":
+                    cropped.convert("RGB").save(buf, format="JPEG", quality=92, optimize=True)
+                else:
+                    cropped.save(buf, format="PNG", optimize=False)
                 out_bytes = buf.getvalue()
-                log(f"sketch cropped {iw}x{ih} -> {cr_c - cl_c}x{cb_c - ct_c}")
+                needs_reencode = False
+                log(f"sketch cropped {iw}x{ih} -> {cr_c - cl_c}x{cb_c - ct_c} ({fmt})")
         except Exception as e:  # noqa: BLE001
             log(f"sketch crop failed (saving full page): {e}")
 
+    if needs_reencode:
+        try:
+            img = Image.open(io.BytesIO(raw))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=92, optimize=True)
+            out_bytes = buf.getvalue()
+        except Exception as e:  # noqa: BLE001
+            log(f"sketch JPEG encode failed (saving as PNG): {e}")
+
+    # Make sure the filename extension matches the actual format.
+    if fmt == "JPEG" and not name.lower().endswith((".jpg", ".jpeg")):
+        name = name.rsplit(".", 1)[0] + ".jpg"
+    elif fmt == "PNG" and not name.lower().endswith(".png"):
+        name = name.rsplit(".", 1)[0] + ".png"
+
     path = SKETCHES_DIR / name
     path.write_bytes(out_bytes)
-    log(f"sketch saved: {path} ({len(out_bytes)} bytes)")
-    return jsonify({"ok": True, "path": str(path), "name": name})
+    log(f"sketch saved: {path} ({len(out_bytes)} bytes, {fmt})")
+    return jsonify({"ok": True, "path": str(path), "name": name, "format": fmt})
 
 
 # ---- Adjustment presets ----

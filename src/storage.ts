@@ -10,6 +10,7 @@ export async function loadStreamConfig(): Promise<StreamConfig> {
     const raw = await ImageProcessor.getConfigValue(STREAM_CONFIG_KEY);
     if (!raw) return DEFAULT_STREAM_CONFIG;
     const parsed = JSON.parse(raw);
+    const fmt = parsed.lassoFormat === 'jpg' ? 'jpg' : 'png';
     return {
       host: typeof parsed.host === 'string' ? parsed.host : '',
       port: typeof parsed.port === 'number' ? parsed.port : DEFAULT_STREAM_CONFIG.port,
@@ -19,6 +20,7 @@ export async function loadStreamConfig(): Promise<StreamConfig> {
         typeof parsed.resolutionMul === 'number'
           ? Math.max(0.1, Math.min(1.0, parsed.resolutionMul))
           : DEFAULT_STREAM_CONFIG.resolutionMul,
+      lassoFormat: fmt as 'png' | 'jpg',
     };
   } catch {
     return DEFAULT_STREAM_CONFIG;

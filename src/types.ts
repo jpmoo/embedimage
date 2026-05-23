@@ -9,7 +9,6 @@ export type Screen =
   | 'refresh'
   | 'sourcepicker'
   | 'dropinbox'
-  | 'sendlasso'
   | 'recognizelasso';
 
 export type DitherMode = 'none' | 'fs1' | 'fs4' | 'atkinson';
@@ -39,11 +38,14 @@ export const DEFAULT_ADJUSTMENTS: Adjustments = {
 
 export type Preset = Adjustments & { name: string };
 
+export type LassoFormat = 'png' | 'jpg';
+
 export type StreamConfig = {
   host: string;
   port: number;
   intervalSec: number;
-  resolutionMul: number; // 0.1 .. 1.0, server downscales each frame
+  resolutionMul: number;     // 0.1 .. 1.0, server downscales each frame
+  lassoFormat: LassoFormat;  // file format used by Send to Mac (lasso)
 };
 
 export const DEFAULT_STREAM_CONFIG: StreamConfig = {
@@ -51,6 +53,7 @@ export const DEFAULT_STREAM_CONFIG: StreamConfig = {
   port: 9000,
   intervalSec: 1.0,
   resolutionMul: 1.0,
+  lassoFormat: 'png',
 };
 
 export type SourceKind = 'screen' | 'window' | 'region';

@@ -2,6 +2,8 @@ import { AppRegistry, Image } from 'react-native';
 import { PluginManager } from 'sn-plugin-lib';
 import App from './App';
 import { name as appName } from './app.json';
+import { runSendLassoToMac } from './src/lassoExport';
+import { loadStreamConfig } from './src/storage';
 
 AppRegistry.registerComponent(appName, () => App);
 
@@ -54,22 +56,37 @@ PluginManager.registerButton(1, ['NOTE'], baseBtn(BUTTON_DROP, 'Drop Inbox'))
 // the user opens the "..." menu and the menu crashes the note app.
 // editDataTypes values per the SDK:
 //   0 handwritten strokes  1 title  2 image  3 text  4 link  5 shapes
+//
+// showType: 0 means "headless" — no plugin view opens when the button
+// is pressed. Action runs straight from the button-press handler and
+// reports back via Toast / Ratta dialog. This is the pattern from
+// jpmoo/lassoexport, which is the only one that works for a real
+// lasso → file pipeline (using saveStickerByLasso underneath).
 PluginManager.registerButton(2, ['NOTE'], {
   ...baseBtn(BUTTON_LASSO_SEND, 'Send to Mac'),
   editDataTypes: [0, 1, 2, 3, 4, 5],
+  showType: 0,
 }).catch((e) => console.log('[embedimage] lasso button register skipped:', e));
 
 // Blended-in Inkling feature: lasso some handwriting, tap "Recognize",
 // the plugin OCRs the strokes via PluginCommAPI.recognizeElements and
 // drops the typed text back into the note. editDataTypes restricted
-// to strokes/text (no point on pure pictures).
+// to strokes/text (no point on pure pictures). showType: 1 because the
+// recognize flow shows a progress dialog (OCR can take seconds).
 PluginManager.registerButton(2, ['NOTE'], {
   ...baseBtn(BUTTON_LASSO_RECOGNIZE, 'Recognize'),
   editDataTypes: [0, 1, 3],
 }).catch((e) => console.log('[embedimage] recognize button register skipped:', e));
 
 PluginManager.registerButtonListener({
-  onButtonPress: (_msg) => {
-    // Routing happens in App.tsx via the listener it registers there.
+  onButtonPress: (msg) => {
+    // showType:0 buttons don't open a view, so we handle their action
+    // here in the headless context. The other buttons (showType:1) are
+    // routed by App.tsx after the view opens.
+    if (msg?.id === BUTTON_LASSO_SEND) {
+      loadStreamConfig()
+        .then((cfg) => runSendLassoToMac(cfg.lassoFormat ?? 'png'))
+        .catch(() => {});
+    }
   },
 });

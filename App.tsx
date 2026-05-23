@@ -7,16 +7,15 @@ import { DropInbox } from './src/screens/DropInbox';
 import { PreviewScreen } from './src/screens/Preview';
 import { RecognizeLasso } from './src/screens/RecognizeLasso';
 import { RefreshScreen } from './src/screens/Refresh';
-import { SendLasso } from './src/screens/SendLasso';
 import { SettingsScreen } from './src/screens/Settings';
 import { SourcePicker } from './src/screens/SourcePicker';
 import { baseUrl, loadStreamConfig } from './src/storage';
 import { DEFAULT_STREAM_CONFIG, Entry, Screen, StreamConfig } from './src/types';
 
-// Must match index.js.
+// Must match index.js. BUTTON_LASSO_SEND (4) is showType:0 — runs
+// headlessly from index.js's button handler — so no route entry here.
 const BUTTON_REFRESH = 2;
 const BUTTON_DROP = 3;
-const BUTTON_LASSO_SEND = 4;
 const BUTTON_LASSO_RECOGNIZE = 5;
 
 export default function App(): React.JSX.Element {
@@ -35,7 +34,6 @@ export default function App(): React.JSX.Element {
       onButtonPress: (msg: any) => {
         if (msg?.id === BUTTON_REFRESH) setScreen('refresh');
         else if (msg?.id === BUTTON_DROP) setScreen('dropinbox');
-        else if (msg?.id === BUTTON_LASSO_SEND) setScreen('sendlasso');
         else if (msg?.id === BUTTON_LASSO_RECOGNIZE) setScreen('recognizelasso');
       },
     });
@@ -60,10 +58,6 @@ export default function App(): React.JSX.Element {
 
   if (screen === 'dropinbox') {
     return <DropInbox onClose={goBrowser} />;
-  }
-
-  if (screen === 'sendlasso') {
-    return <SendLasso onClose={goBrowser} />;
   }
 
   if (screen === 'recognizelasso') {
