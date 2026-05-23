@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { PluginCommAPI, PluginManager } from 'sn-plugin-lib';
+import { PluginCommAPI, PluginFileAPI, PluginManager } from 'sn-plugin-lib';
 import { lanPostFile } from '../imageProcessor';
 import { baseUrl, loadStreamConfig } from '../storage';
 import { theme } from '../ui/theme';
@@ -47,36 +47,54 @@ export function SendLasso({ onClose }: { onClose: () => void }): React.JSX.Eleme
           return;
         }
         if (cancelled) return;
-        setStatus('Exporting lasso…');
-        const tmpPath = `/data/user/0/com.ratta.supernote.pluginhost/cache/lasso_${Date.now()}.png`;
-        console.log('[embedimage] SendLasso generateLassoPreview ->', tmpPath);
-        let res: any;
-        try {
-          res = await PluginCommAPI.generateLassoPreview(tmpPath);
-          console.log('[embedimage] SendLasso generateLassoPreview returned:', JSON.stringify(res));
-        } catch (e: any) {
-          console.log('[embedimage] SendLasso generateLassoPreview threw:', e?.message ?? e);
-          setStatus(`Lasso export failed: ${e?.message ?? e}`);
-          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3000);
+
+        // Inkling / guibor approach: don't use generateLassoPreview (its
+        // sandbox path semantics are flaky). Render the WHOLE PAGE to PNG
+        // via generateNotePng, fetch the lasso rect separately, and ship
+        // both to the Mac. The Mac can crop or display as-is.
+        setStatus('Reading note context…');
+        const fpRes: any = await PluginCommAPI.getCurrentFilePath();
+        const pgRes: any = await PluginCommAPI.getCurrentPageNum();
+        const notePath = fpRes?.result ?? fpRes?.filePath ?? fpRes;
+        const page = pgRes?.result ?? pgRes?.pageNum ?? pgRes;
+        console.log('[embedimage] SendLasso ctx notePath=', notePath, 'page=', page);
+        if (typeof notePath !== 'string' || typeof page !== 'number') {
+          setStatus('Could not get current note/page.');
+          setTimeout(() => PluginManager.closePluginView().catch(() => {}), 2500);
           return;
         }
-        if (!res || res.success === false) {
-          const msg = res?.error?.message ?? 'no lasso content';
-          console.log('[embedimage] SendLasso lasso empty:', msg);
-          setStatus(`Lasso empty: ${msg}\n(Lasso something first, then tap again.)`);
+
+        let lassoRect: any = null;
+        try {
+          const lr: any = await PluginCommAPI.getLassoRect();
+          if (lr?.success !== false && lr?.result) lassoRect = lr.result;
+          console.log('[embedimage] SendLasso getLassoRect ->', JSON.stringify(lassoRect));
+        } catch (e: any) {
+          console.log('[embedimage] SendLasso getLassoRect threw:', e?.message ?? e);
+        }
+
+        setStatus('Rendering page to PNG…');
+        const pngPath = `/data/user/0/com.ratta.supernote.pluginhost/cache/page_${Date.now()}.png`;
+        console.log('[embedimage] SendLasso generateNotePng ->', pngPath);
+        const gen: any = await PluginFileAPI.generateNotePng({
+          notePath, page, times: 1, pngPath, type: 1, // 1 = white background
+        });
+        console.log('[embedimage] SendLasso generateNotePng returned:', JSON.stringify(gen));
+        if (!gen || gen.success === false) {
+          setStatus(`Render failed: ${gen?.error?.message ?? 'unknown'}`);
           setTimeout(() => PluginManager.closePluginView().catch(() => {}), 3500);
           return;
         }
-        const resultPath: string =
-          typeof res?.result === 'string' ? res.result :
-          (res?.result?.path ?? tmpPath);
-        console.log('[embedimage] SendLasso resultPath=', resultPath);
         if (cancelled) return;
-        setPreviewUri('file://' + resultPath);
+        setPreviewUri('file://' + pngPath);
+
         setStatus('Uploading to Mac…');
         const name = `manta_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-        console.log('[embedimage] SendLasso POST', `${url}/sketch?name=${name}`);
-        const out = await lanPostFile(`${url}/sketch?name=${encodeURIComponent(name)}`, resultPath, 'image/png', 30000);
+        const qs = lassoRect
+          ? `?name=${encodeURIComponent(name)}&cropL=${lassoRect.left}&cropT=${lassoRect.top}&cropR=${lassoRect.right}&cropB=${lassoRect.bottom}`
+          : `?name=${encodeURIComponent(name)}`;
+        console.log('[embedimage] SendLasso POST', `${url}/sketch${qs}`);
+        const out = await lanPostFile(`${url}/sketch${qs}`, pngPath, 'image/png', 30000);
         console.log('[embedimage] SendLasso upload ok, response saved at', out);
         if (cancelled) return;
         setStatus(`Sent to Mac as ${name}`);

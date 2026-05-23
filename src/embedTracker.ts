@@ -101,18 +101,22 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     rawKeys: raw ? Object.keys(raw) : null,
   });
 
-  // Clone the existing element verbatim and only swap the picture path
-  // (and clear identity fields so the host treats it as a fresh insert).
-  // Falling back to a minimal element is what was getting rejected as
-  // "Invalid API parameters" — picture elements require maxX/maxY/
-  // status/recognizeResult etc. that we don't synthesize correctly.
+  // Clone the existing element to keep maxX/maxY/thickness/layout fields
+  // intact, but strip everything that describes the OLD picture's data
+  // (uuid/numInPage are obvious; recognizeResult/status/contoursSrc/
+  // angles are derived from the old picture and confuse the host).
   let newElement: any;
   if (raw) {
     newElement = JSON.parse(JSON.stringify(raw));
-    delete newElement.uuid;        // host assigns a fresh one
-    delete newElement.numInPage;   // host assigns a fresh one
+    for (const k of [
+      'uuid', 'numInPage', 'recognizeResult', 'status',
+      'contoursSrc', 'angles',
+    ]) {
+      delete newElement[k];
+    }
     if (newElement.picture) {
       newElement.picture.picturePath = newPngPath;
+      newElement.picture.rect = { ...fresh.rect };
     } else {
       newElement.picture = { picturePath: newPngPath, rect: { ...fresh.rect } };
     }
@@ -127,6 +131,7 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
       },
     };
   }
+  console.log('[embedimage] replaceInPlace newElement keys:', Object.keys(newElement));
 
   let insertOk = false;
   let insertErr: any = null;
@@ -145,12 +150,39 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     console.log('[embedimage] insertElements threw:', insertErr);
   }
 
+  let movedTo: EmbedTrack | null = null;
   if (!insertOk) {
-    // insertImage fallback is unreliable — it placed the new picture
-    // with pageNum=-1 in observed runs, so the user doesn't see it.
-    // Keep the original embed in that case.
-    console.log('[embedimage] insertElements failed (', insertErr, ') — leaving original embed in place');
-    throw new Error(`insert failed (original embed kept): ${insertErr ?? 'unknown'}`);
+    // Fallback: use insertImage (host picks default position, but it
+    // always works) then modifyElements to move the new picture to
+    // fresh.rect. modifyElements doesn't re-load a picture's bitmap,
+    // but it *does* honor rect updates, so this gives us refresh-in-
+    // place even when insertElements rejects our payload shape.
+    console.log('[embedimage] insertElements failed (', insertErr, ') — trying insertImage + move');
+    const img: any = await PluginNoteAPI.insertImage(newPngPath);
+    console.log('[embedimage] insertImage ->', JSON.stringify(img));
+    if (!img || img.success === false) {
+      throw new Error(`insert failed (original embed kept): ${img?.error?.message ?? insertErr ?? 'unknown'}`);
+    }
+    try { await PluginNoteAPI.saveCurrentNote(); } catch {}
+    // Get the new picture's identity so we can move it.
+    try {
+      const lastRes: any = await PluginFileAPI.getLastElement();
+      const newEl = lastRes?.result ?? lastRes;
+      console.log('[embedimage] insertImage placed element:', JSON.stringify(newEl)?.slice(0, 300));
+      if (newEl?.uuid && typeof newEl?.numInPage === 'number') {
+        const moveEl: any = {
+          ...newEl,
+          picture: { ...(newEl.picture ?? {}), rect: { ...fresh.rect } },
+        };
+        const moveRes: any = await PluginFileAPI.modifyElements(
+          fresh.notePath, fresh.page, [moveEl],
+        );
+        console.log('[embedimage] modifyElements (move) ->', JSON.stringify(moveRes));
+        movedTo = fromElement(fresh.notePath, fresh.page, newEl);
+      }
+    } catch (e: any) {
+      console.log('[embedimage] move-after-insertImage threw:', e?.message ?? e);
+    }
   }
 
   try {
@@ -169,15 +201,17 @@ export async function replaceInPlace(track: EmbedTrack, newPngPath: string): Pro
     console.log('[embedimage] saveCurrentNote threw:', e?.message ?? e);
   }
 
-  let newTrack: EmbedTrack | null = null;
-  try {
-    const lastRes: any = await PluginFileAPI.getLastElement();
-    const el = lastRes?.result ?? lastRes;
-    console.log('[embedimage] getLastElement after replace ->', JSON.stringify(el)?.slice(0, 400));
-    newTrack = fromElement(fresh.notePath, fresh.page, el);
-  } catch (e: any) {
-    console.log('[embedimage] getLastElement threw:', e?.message ?? e);
-    newTrack = null;
+  let newTrack: EmbedTrack | null = movedTo;
+  if (!newTrack) {
+    try {
+      const lastRes: any = await PluginFileAPI.getLastElement();
+      const el = lastRes?.result ?? lastRes;
+      console.log('[embedimage] getLastElement after replace ->', JSON.stringify(el)?.slice(0, 400));
+      newTrack = fromElement(fresh.notePath, fresh.page, el);
+    } catch (e: any) {
+      console.log('[embedimage] getLastElement threw:', e?.message ?? e);
+      newTrack = null;
+    }
   }
   if (newTrack) await saveEmbedTrack(newTrack).catch(() => {});
   return newTrack;

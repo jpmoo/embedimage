@@ -659,9 +659,40 @@ def sketch():
         name = f"manta_{time.strftime('%Y%m%d_%H%M%S')}.png"
     if "/" in name or name.startswith("."):
         return jsonify({"error": "invalid name"}), 400
+
+    # If the plugin sent crop coordinates (the lasso rect, in note pixel
+    # coordinates that match the rendered page), crop to just that area.
+    # Otherwise save the whole page as-is.
+    try:
+        cl = int(request.args.get("cropL", "")) if request.args.get("cropL") else None
+        ct = int(request.args.get("cropT", "")) if request.args.get("cropT") else None
+        cr = int(request.args.get("cropR", "")) if request.args.get("cropR") else None
+        cb = int(request.args.get("cropB", "")) if request.args.get("cropB") else None
+    except ValueError:
+        cl = ct = cr = cb = None
+
+    out_bytes = raw
+    if cl is not None and ct is not None and cr is not None and cb is not None and cr > cl and cb > ct:
+        try:
+            img = Image.open(io.BytesIO(raw))
+            iw, ih = img.size
+            # Clamp to image bounds.
+            cl_c = max(0, min(iw, cl))
+            ct_c = max(0, min(ih, ct))
+            cr_c = max(0, min(iw, cr))
+            cb_c = max(0, min(ih, cb))
+            if cr_c > cl_c and cb_c > ct_c:
+                cropped = img.crop((cl_c, ct_c, cr_c, cb_c))
+                buf = io.BytesIO()
+                cropped.save(buf, format="PNG", optimize=False)
+                out_bytes = buf.getvalue()
+                log(f"sketch cropped {iw}x{ih} -> {cr_c - cl_c}x{cb_c - ct_c}")
+        except Exception as e:  # noqa: BLE001
+            log(f"sketch crop failed (saving full page): {e}")
+
     path = SKETCHES_DIR / name
-    path.write_bytes(raw)
-    log(f"sketch saved: {path}")
+    path.write_bytes(out_bytes)
+    log(f"sketch saved: {path} ({len(out_bytes)} bytes)")
     return jsonify({"ok": True, "path": str(path), "name": name})
 
 
