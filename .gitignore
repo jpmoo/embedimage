@@ -5,6 +5,10 @@ dist/
 *.log
 .metro-health-check*
 
+# Python
+__pycache__/
+*.pyc
+
 # Android
 android/.gradle/
 android/build/
