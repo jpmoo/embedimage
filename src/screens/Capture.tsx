@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { PluginManager } from 'sn-plugin-lib';
 import { AdjustmentPanel } from '../AdjustmentPanel';
-import { downloadAndBake } from '../imageProcessor';
+import { downloadAndBake, lanHttp, lanJson } from '../imageProcessor';
 import { insertAndTrack, replaceInPlace } from '../embedTracker';
 import { baseUrl, saveStreamConfig } from '../storage';
 import {
@@ -80,19 +80,9 @@ export function CaptureScreen({
   useEffect(() => {
     if (!url) return;
     const timer = setTimeout(() => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 2000);
-      fetch(`${url}/adjust`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(adjustments),
-        signal: ctrl.signal,
-      })
-        .then(() => clearTimeout(t))
-        .catch((e: any) => {
-          clearTimeout(t);
-          pushLog(`adjust push failed: ${e?.message ?? e}`);
-        });
+      lanHttp('POST', `${url}/adjust`, adjustments, 2000).catch((e: any) => {
+        pushLog(`adjust push failed: ${e?.message ?? e}`);
+      });
     }, 250);
     return () => clearTimeout(timer);
   }, [adjustments, url, pushLog]);
@@ -157,11 +147,7 @@ export function CaptureScreen({
       return;
     }
     try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 3000);
-      const r = await fetch(`${url}/status`, { signal: ctrl.signal });
-      clearTimeout(t);
-      const j = await r.json();
+      const j: any = await lanJson('GET', `${url}/status`, undefined, 3000);
       pushLog(`status: running=${j.running}, src=${j.source}, ip=${j.ip ?? '?'}`);
     } catch (e: any) {
       pushLog(`status failed: ${e?.message ?? e}`);

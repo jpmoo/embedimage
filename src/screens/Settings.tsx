@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { baseUrl, loadStreamConfig, saveStreamConfig } from '../storage';
+import { lanJson } from '../imageProcessor';
 import { DEFAULT_STREAM_CONFIG, StreamConfig } from '../types';
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -43,15 +44,7 @@ export function SettingsScreen({
     try {
       const portNum = clamp(parseInt(port, 10) || 0, 1, 65535);
       const url = `http://${host.trim()}:${portNum}/status`;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) {
-        setStatus(`HTTP ${res.status}`);
-        return;
-      }
-      const json = await res.json();
+      const json: any = await lanJson('GET', url, undefined, 4000);
       setStatus(`ok — running=${json.running}, source=${json.source}, ip=${json.ip ?? '?'}`);
     } catch (e: any) {
       setStatus(`failed: ${e?.message ?? e}`);

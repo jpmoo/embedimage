@@ -19,6 +19,14 @@ type ImageProcessorNative = {
     previewMaxDim: number,
     timeoutMs: number,
   ) => Promise<string>;
+  // Cleartext-safe HTTP for LAN endpoints. Bypasses Android's
+  // NetworkSecurityPolicy (the pluginhost blocks our JS fetch()).
+  nativeHttp: (
+    method: string,
+    url: string,
+    bodyJson: string | null,
+    timeoutMs: number,
+  ) => Promise<{ status: number; body: string }>;
   cleanupCache: () => Promise<number>;
   getConfigValue: (key: string) => Promise<string | null>;
   setConfigValue: (key: string, value: string | null) => Promise<boolean>;
@@ -69,4 +77,25 @@ export async function downloadAndBake(
     previewMaxDim,
     timeoutMs,
   );
+}
+
+export async function lanHttp(
+  method: 'GET' | 'POST',
+  url: string,
+  body?: object,
+  timeoutMs: number = 3000,
+): Promise<{ status: number; body: string }> {
+  if (!native) throw new Error('ImageProcessor native module missing');
+  return native.nativeHttp(method, url, body ? JSON.stringify(body) : null, timeoutMs);
+}
+
+export async function lanJson<T = any>(
+  method: 'GET' | 'POST',
+  url: string,
+  body?: object,
+  timeoutMs: number = 3000,
+): Promise<T> {
+  const res = await lanHttp(method, url, body, timeoutMs);
+  if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
+  return JSON.parse(res.body) as T;
 }

@@ -2,13 +2,19 @@ package com.embedimage
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableMap
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 import kotlin.math.max
 import kotlin.math.min
@@ -53,19 +59,14 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
     ) {
         var dlFile: File? = null
         try {
-            val conn = URL(url).openConnection() as HttpURLConnection
-            conn.connectTimeout = timeoutMs
-            conn.readTimeout = timeoutMs
-            conn.requestMethod = "GET"
-            conn.doInput = true
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                throw RuntimeException("HTTP $code")
+            // Raw-socket HTTP bypasses Android's NetworkSecurityPolicy, which
+            // blocks cleartext to LAN IPs inside the Supernote pluginhost.
+            val (status, body) = rawHttpRequest("GET", url, null, null, timeoutMs)
+            if (status !in 200..299) {
+                throw RuntimeException("HTTP $status")
             }
             dlFile = File(reactApplicationContext.cacheDir, "dl_${System.currentTimeMillis()}.bin")
-            conn.inputStream.use { input ->
-                FileOutputStream(dlFile).use { out -> input.copyTo(out) }
-            }
+            FileOutputStream(dlFile).use { it.write(body) }
             val outPath = bake(dlFile.absolutePath, whiteAlpha, brightness, contrast, gamma, previewMaxDim)
             promise.resolve(outPath)
         } catch (e: Throwable) {
@@ -73,6 +74,128 @@ class ImageProcessorModule(reactContext: ReactApplicationContext) :
         } finally {
             dlFile?.delete()
         }
+    }
+
+    // Cleartext-safe HTTP fetch used by JS for small JSON endpoints
+    // (/status, /adjust). Returns {status:int, body:string}. Body is decoded
+    // as UTF-8; for binary payloads use downloadAndProcess.
+    @ReactMethod
+    fun nativeHttp(
+        method: String,
+        url: String,
+        bodyJson: String?,
+        timeoutMs: Int,
+        promise: Promise,
+    ) {
+        try {
+            val (status, raw) = rawHttpRequest(
+                method.uppercase(),
+                url,
+                if (bodyJson.isNullOrEmpty()) null else bodyJson.toByteArray(Charsets.UTF_8),
+                if (bodyJson.isNullOrEmpty()) null else "application/json; charset=utf-8",
+                timeoutMs,
+            )
+            val result: WritableMap = Arguments.createMap()
+            result.putInt("status", status)
+            result.putString("body", String(raw, Charsets.UTF_8))
+            promise.resolve(result)
+        } catch (e: Throwable) {
+            promise.reject("E_HTTP", e.message ?: e.toString(), e)
+        }
+    }
+
+    private fun rawHttpRequest(
+        method: String,
+        url: String,
+        body: ByteArray?,
+        contentType: String?,
+        timeoutMs: Int,
+    ): Pair<Int, ByteArray> {
+        val u = URL(url)
+        require(u.protocol.equals("http", ignoreCase = true)) { "only http:// supported" }
+        val host = u.host
+        val port = if (u.port == -1) 80 else u.port
+        val path = (u.path.ifEmpty { "/" }) + (if (u.query != null) "?" + u.query else "")
+
+        Socket().use { sock ->
+            sock.connect(InetSocketAddress(host, port), timeoutMs)
+            sock.soTimeout = timeoutMs
+
+            val out: OutputStream = sock.getOutputStream()
+            val req = StringBuilder()
+            req.append("$method $path HTTP/1.1\r\n")
+            req.append("Host: $host${if (port == 80) "" else ":$port"}\r\n")
+            req.append("Connection: close\r\n")
+            req.append("Accept-Encoding: identity\r\n")
+            req.append("User-Agent: EmbedImage/1\r\n")
+            if (body != null) {
+                req.append("Content-Type: ${contentType ?: "application/octet-stream"}\r\n")
+                req.append("Content-Length: ${body.size}\r\n")
+            }
+            req.append("\r\n")
+            out.write(req.toString().toByteArray(Charsets.US_ASCII))
+            if (body != null) out.write(body)
+            out.flush()
+
+            val inp: InputStream = sock.getInputStream()
+            val all = ByteArrayOutputStream()
+            val buf = ByteArray(8192)
+            while (true) {
+                val n = inp.read(buf)
+                if (n <= 0) break
+                all.write(buf, 0, n)
+            }
+            val raw = all.toByteArray()
+            val sep = indexOfDoubleCRLF(raw)
+                ?: throw RuntimeException("malformed HTTP response (no header terminator)")
+            val headerStr = String(raw, 0, sep, Charsets.US_ASCII)
+            var bodyBytes = raw.copyOfRange(sep + 4, raw.size)
+
+            val lines = headerStr.split("\r\n")
+            val statusLine = lines.firstOrNull() ?: throw RuntimeException("empty HTTP response")
+            val statusParts = statusLine.split(" ", limit = 3)
+            if (statusParts.size < 2) throw RuntimeException("bad status line: $statusLine")
+            val status = statusParts[1].toIntOrNull()
+                ?: throw RuntimeException("bad status code: ${statusParts[1]}")
+
+            val isChunked = lines.drop(1).any {
+                val ix = it.indexOf(':')
+                if (ix < 0) false
+                else it.substring(0, ix).trim().equals("Transfer-Encoding", ignoreCase = true)
+                    && it.substring(ix + 1).trim().contains("chunked", ignoreCase = true)
+            }
+            if (isChunked) bodyBytes = decodeChunked(bodyBytes)
+            return status to bodyBytes
+        }
+    }
+
+    private fun indexOfDoubleCRLF(data: ByteArray): Int? {
+        var i = 0
+        while (i <= data.size - 4) {
+            if (data[i] == 0x0D.toByte() && data[i + 1] == 0x0A.toByte()
+                && data[i + 2] == 0x0D.toByte() && data[i + 3] == 0x0A.toByte()
+            ) return i
+            i++
+        }
+        return null
+    }
+
+    private fun decodeChunked(input: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        var i = 0
+        while (i < input.size) {
+            var j = i
+            while (j < input.size - 1 && !(input[j] == 0x0D.toByte() && input[j + 1] == 0x0A.toByte())) j++
+            if (j >= input.size - 1) break
+            val sizeLine = String(input, i, j - i, Charsets.US_ASCII).substringBefore(';').trim()
+            val size = sizeLine.toIntOrNull(16) ?: break
+            i = j + 2
+            if (size == 0) break
+            if (i + size > input.size) break
+            out.write(input, i, size)
+            i += size + 2
+        }
+        return out.toByteArray()
     }
 
     private fun bake(
